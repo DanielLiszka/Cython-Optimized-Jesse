@@ -15,7 +15,7 @@ This is a maintained modified version of the Jesse backtesting framework. Create
 
 ## Benchmark
 
-Iteration times were recorded for a backtest using the example [SMACrossover](https://github.com/jesse-ai/example-strategies/blob/master/SMACrossover/__init__.py) strategy on the Bitfinex exchange with the BTC-USD pair from 2018-01-01 - 2022-11-01
+Iteration times for multiple timeframes were recorded for a backtest using the example [SMACrossover](https://github.com/jesse-ai/example-strategies/blob/master/SMACrossover/__init__.py) strategy on the Bitfinex exchange with the BTC-USD pair from 2018-01-01 - 2022-11-01
 ##### Original 
 
 ```bash
