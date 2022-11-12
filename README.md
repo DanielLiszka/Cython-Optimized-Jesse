@@ -5,7 +5,7 @@ This is a maintained modified version of the Jesse backtesting framework. Create
 * Stock backtesting/optimization 
 * Forex backtesting/optimization 
 * optional indicator precalculation (initially hardcoded)
-* Monte Carlo Simualtion
+* Monte Carlo Simulation
 * Significantly improved backtest simulation speed
 
 ## Removed Features
