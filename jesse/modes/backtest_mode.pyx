@@ -137,7 +137,7 @@ def run(
         generate_json=json,
         generate_equity_curve=True,
         generate_hyperparameters=True,
-        start_date = start_date,
+        start_date = start_date, 
         finish_date = finish_date
     )
     # print(result)
@@ -154,6 +154,7 @@ def run(
     # profiler.disable()
     # pr_stats = pstats.Stats(profiler).sort_stats('tottime')
     # pr_stats.print_stats(50)
+    
     # close database connection
     from jesse.services.db import database
     database.close_connection()
@@ -619,16 +620,18 @@ def trim_zeros(arr):
     return arr[slices]
 
     
-def indicator_precalculation(dict candles,double [:,::1] first_candles_set,strategy, bint skip_1m):
-    # import time 
-    # start = time.time()
-    
+def indicator_precalculation(dict candles,double [:,::1] first_candles_set,strategy, bint skip_1m = False):
     cdef Py_ssize_t  i, consider_timeframes, candle_prestorage_shape, index, offset, length,rows, index2, candle_count
     cdef np.ndarray candle_prestorage, partial_array, gen_candles, partial_date_array, modified_partial_array
     cdef double [:,::1] new_candles, new_array, date_index
     cdef double [::1] indicator1_array, indicator2_array, indicator3_array, indicator4_array,indicator5_array,indicator6_array,indicator7_array,indicator8_array,indicator9_array,indicator10_array
     cdef bint stock_prices = False
-    cdef bint trip 
+    cdef bint preload_candles = False
+    cdef bint skipping = False
+    if jh.get_config('env.simulation.preload_candles'):
+        preload_candles = True   
+        if jh.get_config('env.simulation.skip'):
+            skipping = True
     indicator1_storage = {}
     indicator2_storage = {}
     indicator3_storage = {}
@@ -682,11 +685,8 @@ def indicator_precalculation(dict candles,double [:,::1] first_candles_set,strat
                     if ((i + 1) % consider_timeframes == 0):
                         partial_array[(index)] = generate_candles_from_minutes(new_array[(i - (consider_timeframes-1)):(i+1)])
                         index = index + 1 
-                        
             # print(index) 
             # print(date_index)
-            # np.savetxt("test_indicator3.csv", partial_array, delimiter=",") 
-
             indicator1 = strategy._indicator1(precalc_candles = partial_array)
             indicator2 = strategy._indicator2(precalc_candles = partial_array)
             indicator3 = strategy._indicator3(precalc_candles = partial_array)
@@ -697,9 +697,7 @@ def indicator_precalculation(dict candles,double [:,::1] first_candles_set,strat
             indicator8 = strategy._indicator8(precalc_candles = partial_array)
             indicator9 = strategy._indicator9(precalc_candles = partial_array)
             indicator10 = strategy._indicator10(precalc_candles = partial_array)
-            del new_candles
-            del new_array
-            del full_array
+            
             if stock_prices:
                 np.pad(date_index, (0, 3000), 'constant')
                 for i in range(candle_count+((candle_prestorage_shape/consider_timeframes)-1)):
@@ -768,6 +766,11 @@ def indicator_precalculation(dict candles,double [:,::1] first_candles_set,strat
                 indicator10_storage[key] = indicator10 
             else:
                 indicator10_storage = None
+                
+            if preload_candles and skip_1m:
+                partial_array = np.delete(partial_array,slice(0,candle_prestorage_shape/consider_timeframes),axis=0) 
+                store.candles.storage[key].array = partial_array
+                
     # end = time.time()
     # print(format(end-start))
     # print(len(partial_array))
@@ -803,6 +806,7 @@ def skip_simulator(candles: dict,
     cdef dict indicator1_storage, indicator2_storage, indicator3_storage, indicator4_storage, indicator5_storage, indicator6_storage, indicator7_storage, indicator8_storage, indicator9_storage, indicator10_storage
     cdef int count, max_skip, length, min_timeframe_remainder, total, skip, generate_new_candle, f_offset
     cdef int offset = 0
+    cdef bint preload_candles = False
     cdef np.ndarray indicator1_f, indicator2_f, indicator3_f, indicator4_f, indicator5_f, indicator6_f, indicator7_f, indicator8_f, indicator9_f,indicator10_f
     begin_time_track = time.time()
     key = f"{config['app']['considering_candles'][0][0]}-{config['app']['considering_candles'][0][1]}"
@@ -873,19 +877,42 @@ def skip_simulator(candles: dict,
     else:
         precalc_bool = False
 
-    
+    if jh.get_config('env.simulation.preload_candles'):
+        preload_candles = True
+        if skip < 60:
+            min_timeframe_str = str(skip)+"m"
+        elif skip >= 60 and skip < 1440:
+            min_timeframe_str = str(skip/60)+"h"
+        elif skip == 1440:
+            min_timeframe_str = "1D"
+        
+        
     while i <= length:
         # update time = open new candle, use i-1  because  0 < i <= length
         store.app.time = first_candles_set[i - 1][0] + 60_000
 
         # add candles
         for j in candles:
-            short_candles = candles[j]['candles'][i - skip: i]
             # remove previous_short_candle fix
             exchange = candles[j]['exchange']
             symbol = candles[j]['symbol']
-
-            store.candles.add_multiple_candles(short_candles, exchange, symbol, '1m', with_execution=False,
+            # if preload_candles == True:
+                # _string = f'{exchange}-{symbol}-{min_timeframe_str}'
+                # print(f'my candles: {(store.candles.storage[_string].array[(i/skip)-1])[0]}')
+                # print(f"OG candles: {generate_candle_from_one_minutes(candles[j]['candles'][i - skip: i])[0]}")
+                # if i > 60:
+                    # exit(1)
+                # print(f' I: {i} - skip: {skip}')
+                # try:
+                    # _string = f'{exchange}-{symbol}-{min_timeframe_str}'
+                    # assert (generate_candle_from_one_minutes(candles[j]['candles'][i - skip: i]))[0] == (store.candles.storage[_string].array[(i/skip)-1])[0]
+                # except AssertionError,error:
+                    # print(f" {generate_candle_from_one_minutes(candles[j]['candles'][i - skip: i])[0]} - diff: {store.candles.storage[f'{exchange}-{symbol}-{min_timeframe_str}'].array[(i/skip)-1][0]}")
+                    # Exception
+                    
+            if preload_candles == False:
+                short_candles = candles[j]['candles'][i - skip: i]
+                store.candles.add_multiple_candles(short_candles, exchange, symbol, '1m', with_execution=False,
                                      with_generation=False)
 
             # print short candle
@@ -894,29 +921,31 @@ def skip_simulator(candles: dict,
 
             # only to check for a limit orders in this interval, its not necessary that the short_candles is the size of
             # any timeframe candle
-            current_temp_candle = generate_candle_from_one_minutes(
-                                                                   short_candles)
-
+                current_temp_candle = generate_candle_from_one_minutes(
+                                                                   short_candles) 
+            else:
+                current_temp_candle = store.candles.storage[f'{exchange}-{symbol}-{min_timeframe_str}'].array[(i/skip)-1] #current_temp_candle = generate_candle_from_one_minutes(candles[j]['candles'][i - skip: i]) 
             # if i - skip > 0:
                 # current_temp_candle = _get_fixed_jumped_candle(candles[j]['candles'][i - skip - 1],
                                                                # current_temp_candle)
                                                                
             # in this new prices update there might be an order that needs to be executed
-            _simulate_price_change_effect(current_temp_candle, exchange, symbol)
+            _simulate_price_change_effect(current_temp_candle, exchange, symbol,preload_candles)
 
             # generate and add candles for bigger timeframes
-            for timeframe in config['app']['considering_timeframes']:
-                # for 1m, no work is needed
-                if timeframe == '1m':
-                    continue
+            if preload_candles == False:
+                for timeframe in config['app']['considering_timeframes']:
+                    # for 1m, no work is needed
+                    if timeframe == '1m':
+                        continue
 
-                # if timeframe is constructed by 1m candles without sync
-                count = dic[timeframe]
-                if i % count == 0:
-                    generated_candle = generate_candle_from_one_minutes(
-                        candles[j]['candles'][i - count:i])
-                    store.candles.add_candle(generated_candle, exchange, symbol, timeframe, with_execution=False,
-                                             with_generation=False)
+                    # if timeframe is constructed by 1m candles without sync
+                    count = dic[timeframe]
+                    if i % count == 0:
+                        generated_candle = generate_candle_from_one_minutes(
+                            candles[j]['candles'][i - count:i])
+                        store.candles.add_candle(generated_candle, exchange, symbol, timeframe, with_execution=False,
+                                                 with_generation=False)
 
         # update progressbar
         if not run_silently and i % (min_timeframe * update_dashboard) == 0:
@@ -1131,7 +1160,7 @@ def _get_fixed_jumped_candle(previous_candle: np.ndarray, candle: np.ndarray) ->
     return candle
 
 
-def _simulate_price_change_effect(real_candle: np.ndarray, exchange: str, symbol: str) -> None:
+def _simulate_price_change_effect(real_candle: np.ndarray, exchange: str, symbol: str, bint precalc_candles = False) -> None:
     cdef bint executed_order
     cdef Py_ssize_t index
     # cdef str key 
@@ -1148,7 +1177,7 @@ def _simulate_price_change_effect(real_candle: np.ndarray, exchange: str, symbol
         else:
             for index, order in enumerate(orders):
                 if index == len_orders - 1 and not order.status == order_statuses.ACTIVE:
-                    executed_order = False
+                    executed_order = False 
 
                 if not order.status == order_statuses.ACTIVE:
                     continue
@@ -1158,11 +1187,12 @@ def _simulate_price_change_effect(real_candle: np.ndarray, exchange: str, symbol
                     except Exception as e: 
                         print(e)
                         print(f'{current_temp_candle} - {order.price}')
-                    store.candles.add_one_candle(
-                        storable_temp_candle, exchange, symbol, '1m',
-                        with_execution=False,
-                        with_generation=False
-                    )
+                    if not precalc_candles:
+                        store.candles.add_one_candle(
+                            storable_temp_candle, exchange, symbol, '1m',
+                            with_execution=False,
+                            with_generation=False
+                        )
                     # p = selectors.get_position(exchange, symbol)
                     p.current_price = storable_temp_candle[2]
 
@@ -1178,11 +1208,12 @@ def _simulate_price_change_effect(real_candle: np.ndarray, exchange: str, symbol
 
         if not executed_order:
             # add/update the real_candle to the store so we can move on
-            store.candles.add_one_candle(
-                real_candle, exchange, symbol, '1m',
-                with_execution=False,
-                with_generation=False
-            )
+            if not precalc_candles:
+                store.candles.add_one_candle(
+                    real_candle, exchange, symbol, '1m',
+                    with_execution=False,
+                    with_generation=False
+                )
             # p = selectors.get_position(exchange, symbol)
             if p:
                 p.current_price = real_candle[2]
