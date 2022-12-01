@@ -3,7 +3,7 @@
 
 import time
 from typing import Dict, Union, List
-# from guppy import hpy; h=hpy() 
+# from guppy import hpy
 import arrow
 import numpy as np
 cimport numpy as np 
@@ -26,7 +26,6 @@ import jesse.helpers as jh
 import jesse.services.metrics as stats
 import jesse.services.required_candles as required_candles
 # import jesse.services.selectors as selectors
-# from guppy import hpy
 from jesse import exceptions
 from jesse.config import config
 from jesse.enums import timeframes, order_types
@@ -79,7 +78,7 @@ def run(
     # import cProfile, pstats 
     # profiler = cProfile.Profile()
     # profiler.enable()    
-    
+   
     cdef list change,data
     cdef int routes_count, index
     # cdef float price_pct_change, bh_daily_returns_all_routes
@@ -627,11 +626,8 @@ def indicator_precalculation(dict candles,double [:,::1] first_candles_set,strat
     cdef double [::1] indicator1_array, indicator2_array, indicator3_array, indicator4_array,indicator5_array,indicator6_array,indicator7_array,indicator8_array,indicator9_array,indicator10_array
     cdef bint stock_prices = False
     cdef bint preload_candles = False
-    cdef bint skipping = False
     if jh.get_config('env.simulation.preload_candles'):
         preload_candles = True   
-        if jh.get_config('env.simulation.skip'):
-            skipping = True
     indicator1_storage = {}
     indicator2_storage = {}
     indicator3_storage = {}
@@ -768,8 +764,9 @@ def indicator_precalculation(dict candles,double [:,::1] first_candles_set,strat
                 indicator10_storage = None
                 
             if preload_candles and skip_1m:
-                partial_array = np.delete(partial_array,slice(0,candle_prestorage_shape/consider_timeframes),axis=0) 
                 store.candles.storage[key].array = partial_array
+                partial_array = np.delete(partial_array,slice(0,candle_prestorage_shape/consider_timeframes),axis=0)
+                strategy.slice_amount[key] = (candle_prestorage_shape/consider_timeframes)+1
                 
     # end = time.time()
     # print(format(end-start))
@@ -903,12 +900,12 @@ def skip_simulator(candles: dict,
                 # if i > 60:
                     # exit(1)
                 # print(f' I: {i} - skip: {skip}')
-                # try:
-                    # _string = f'{exchange}-{symbol}-{min_timeframe_str}'
-                    # assert (generate_candle_from_one_minutes(candles[j]['candles'][i - skip: i]))[0] == (store.candles.storage[_string].array[(i/skip)-1])[0]
-                # except AssertionError,error:
-                    # print(f" {generate_candle_from_one_minutes(candles[j]['candles'][i - skip: i])[0]} - diff: {store.candles.storage[f'{exchange}-{symbol}-{min_timeframe_str}'].array[(i/skip)-1][0]}")
-                    # Exception
+            # try:
+                # _key = f'{exchange}-{symbol}-{min_timeframe_str}'
+                # assert (generate_candle_from_one_minutes(candles[j]['candles'][i - skip: i]))[0] == store.candles.storage[_key].array[((i/skip)-1)+strategy.slice_amount[_key]-1][0]
+            # except AssertionError,error:
+                # print(f" {generate_candle_from_one_minutes(candles[j]['candles'][i - skip: i])[0]} - diff: {store.candles.storage[_key].array[((i/skip)-1)+strategy.slice_amount[_key]-1][0]}")
+                # Exception
                     
             if preload_candles == False:
                 short_candles = candles[j]['candles'][i - skip: i]
@@ -924,7 +921,8 @@ def skip_simulator(candles: dict,
                 current_temp_candle = generate_candle_from_one_minutes(
                                                                    short_candles) 
             else:
-                current_temp_candle = store.candles.storage[f'{exchange}-{symbol}-{min_timeframe_str}'].array[(i/skip)-1] #current_temp_candle = generate_candle_from_one_minutes(candles[j]['candles'][i - skip: i]) 
+                _key = f'{exchange}-{symbol}-{min_timeframe_str}'
+                current_temp_candle = store.candles.storage[_key].array[((i/skip)-1)+strategy.slice_amount[_key]-1] #current_temp_candle = generate_candle_from_one_minutes(candles[j]['candles'][i - skip: i]) 
             # if i - skip > 0:
                 # current_temp_candle = _get_fixed_jumped_candle(candles[j]['candles'][i - skip - 1],
                                                                # current_temp_candle)
@@ -992,12 +990,12 @@ def skip_simulator(candles: dict,
 
         if i % 1440 == 0:
             save_daily_portfolio_balance()
-
-        skip = _skip_n_candles(candles, min_timeframe_remainder, i)
-        if skip < min_timeframe_remainder:
-            min_timeframe_remainder -= skip
-        elif skip == min_timeframe_remainder:
-            min_timeframe_remainder = min_timeframe
+        if preload_candles == False:
+            skip = _skip_n_candles(candles, min_timeframe_remainder, i)
+            if skip < min_timeframe_remainder:
+                min_timeframe_remainder -= skip
+            elif skip == min_timeframe_remainder:
+                min_timeframe_remainder = min_timeframe
         i += skip
 
     res = 0

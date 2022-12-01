@@ -147,7 +147,7 @@ def portfolio_metrics() -> Union[dict, None]:
     return stats.trades(store.completed_trades.trades, store.app.daily_balance)
 
 
-def info() -> List[List[Union[str, Any]]]:
+def info(): # -> List[List[Union[str, Any]]]:
     return [
         [
             jh.timestamp_to_time(w['time'])[11:19],
@@ -158,7 +158,7 @@ def info() -> List[List[Union[str, Any]]]:
         for w in store.logs.info[::-1][0:5]
     ]
 
-def watch_list() -> List[List[Union[str, str]]]:
+def watch_list(): # -> List[List[Union[str, str]]]:
     """
     Returns a list of data that are currently being watched in realtime
     only support the first route
@@ -182,7 +182,7 @@ def watch_list() -> List[List[Union[str, str]]]:
         watch_list_array[index] = (str(value[0]), str(value[1]))
     return watch_list_array if len(watch_list_array) else []
 
-def errors() -> List[List[Union[str, Any]]]:
+def errors(): # -> List[List[Union[str, Any]]]:
     return [
         [
             jh.timestamp_to_time(w['time'])[11:19],

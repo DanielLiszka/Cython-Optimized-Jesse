@@ -65,6 +65,7 @@ class Strategy(ABC):
         self.full_name = None
         self.index:int  = 0
         self.vars = {}
+        self.preload_candles = False
 
         self.increased_count: int = 0
         self.reduced_count: int = 0
@@ -105,6 +106,7 @@ class Strategy(ABC):
 
         self._cached_methods = {}
         self._cached_metrics = {}
+        self.slice_amount = {}
         
     def update_new_candle(self, candle, exchange, symbol, timeframe):
         pass
@@ -118,7 +120,8 @@ class Strategy(ABC):
         key = f'{self.exchange}-{self.symbol}'
         self.position = store.positions.storage.get(key, None)
         self.broker = Broker(self.position, self.exchange, self.symbol, self.timeframe)
-
+        if jh.get_config('env.simulation.preload_candles'):
+            self.preload_candles = True
         if self.hp is None and len(self.hyperparameters()) > 0:
             self.hp = {}
             for dna in self.hyperparameters():
@@ -993,7 +996,7 @@ class Strategy(ABC):
 
         :return: np.ndarray
         """
-        return store.candles.get_candles(self.exchange, self.symbol, self.timeframe)
+        return store.candles.get_candles(self.exchange, self.symbol, self.timeframe) if not self.preload_candles else store.candles.storage[f'{self.exchange}-{self.symbol}-{self.timeframe}'].array[0:self.slice_amount[f'{self.exchange}-{self.symbol}-{self.timeframe}'] + self.index]
 
     def get_candles(self, exchange: str, symbol: str, timeframe: str) -> np.ndarray:
         """

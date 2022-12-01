@@ -18,9 +18,7 @@ from jesse.store import store
 from jesse.services import selectors
 
 def candles_info(candles_array: np.ndarray) -> dict:
-    cdef unsigned long period = jh.date_diff_in_days(
-        jh.timestamp_to_arrow(candles_array[0][0]),
-        jh.timestamp_to_arrow(candles_array[-1][0])) + 1
+    cdef unsigned long period = jh.date_diff_in_days(jh.timestamp_to_arrow(candles_array[0][0]),jh.timestamp_to_arrow(candles_array[-1][0])) + 1
 
     if period > 365:
         duration = f'{period} days ({round(period / 365, 2)} years)'
