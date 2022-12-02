@@ -206,7 +206,7 @@ class DynamicNumpyArray:
         cdef Py_ssize_t index = self.index 
         cdef int bucket_size = self.bucket_size
         if index != 0 and (index + 1) % bucket_size == 0:
-            new_bucket = np.zeros((bucket_size,6),dtype=DTYPE)
+            new_bucket = np.zeros((self.shape),dtype=DTYPE)
             self.array = np.concatenate((self.array, new_bucket), axis=0, dtype=DTYPE)
         self.array[index] = item
         
