@@ -12,6 +12,10 @@ This is a maintained modified version of the Jesse backtesting framework. Create
 
 * live trading
 
+## Installation 
+
+First, install the necessary python packages listed in the "requirements.txt" via the pip package manager. Then execute the cythonize.py script in the root of where you downloaded this repository. Copy the "jesse" folder and place it where you downloaded the origional Jesse repository. 
+
 
 ## Benchmark
 
