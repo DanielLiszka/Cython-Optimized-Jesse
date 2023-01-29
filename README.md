@@ -2,12 +2,12 @@ This is a maintained modified version of the Jesse backtesting framework. Create
 
 ## Planned New Features
 
-* Stock backtesting/optimization 
 * Forex backtesting/optimization 
 
 ## New Features
 
-* optional indicator precalculation w/o candle preloading
+* Stock backtesting/optimization 
+* Optional indicator precalculation w/o candle preloading
 * Monte Carlo Simulation
 * Significantly improved backtest simulation speed
 

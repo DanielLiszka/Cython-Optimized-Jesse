@@ -622,7 +622,8 @@ def trim_zeros(arr):
 def indicator_precalculation(dict candles,double [:,::1] first_candles_set,strategy, bint skip_1m = False):
     cdef Py_ssize_t  i, consider_timeframes, candle_prestorage_shape, index, offset, length,rows, index2, candle_count
     cdef np.ndarray candle_prestorage, partial_array, gen_candles, partial_date_array, modified_partial_array
-    cdef double [:,::1] new_candles, new_array, date_index
+    # cdef double [:,::1] new_array
+    cdef double [:,::1] new_candles, date_index
     cdef double [::1] indicator1_array, indicator2_array, indicator3_array, indicator4_array,indicator5_array,indicator6_array,indicator7_array,indicator8_array,indicator9_array,indicator10_array
     cdef bint stock_prices = False
     cdef bint preload_candles = False
@@ -644,7 +645,7 @@ def indicator_precalculation(dict candles,double [:,::1] first_candles_set,strat
                 continue
 
             exchange = candles[j]['exchange']
-            if exchange is {'Polygon_Stocks'}:
+            if exchange == ('Polygon_Stocks' or {'Polygon_Stocks'}):
                 stock_prices = True
             symbol = candles[j]['symbol']
             new_candles = candles[j]['candles']
@@ -667,7 +668,7 @@ def indicator_precalculation(dict candles,double [:,::1] first_candles_set,strat
                     if ((i + 1) % consider_timeframes == 0):
                         partial_array[(index)] = generate_candles_from_minutes(new_array[(i - (consider_timeframes-1)):(i+1)])
                         gen_candles = partial_array[(index)] 
-                        if (gen_candles[5] == 0 and gen_candles[3] != 0 and gen_candles[2] != 0 and gen_candles[1] == gen_candles[2] and gen_candles[3] == gen_candles[2] and gen_candles[4] == gen_candles[2]):
+                        if (gen_candles[5] == 0): #and gen_candles[3] != 0 and gen_candles[2] != 0 and gen_candles[1] == gen_candles[2] and gen_candles[3] == gen_candles[2] and gen_candles[4] == gen_candles[2]):
                             index = index
                             index2 = index2 + 1
                         else: 
@@ -681,7 +682,8 @@ def indicator_precalculation(dict candles,double [:,::1] first_candles_set,strat
                     if ((i + 1) % consider_timeframes == 0):
                         partial_array[(index)] = generate_candles_from_minutes(new_array[(i - (consider_timeframes-1)):(i+1)])
                         index = index + 1 
-            # print(index) 
+            # print(f'Index : {index}') 
+            # pd.DataFrame(new_array).to_csv('new_array.csv')
             # print(date_index)
             indicator1 = strategy._indicator1(precalc_candles = partial_array)
             indicator2 = strategy._indicator2(precalc_candles = partial_array)
@@ -763,7 +765,7 @@ def indicator_precalculation(dict candles,double [:,::1] first_candles_set,strat
             else:
                 indicator10_storage = None
                 
-            if preload_candles and skip_1m:
+            if preload_candles and skip_1m and not stock_prices:
                 store.candles.storage[key].array = partial_array
                 partial_array = np.delete(partial_array,slice(0,candle_prestorage_shape/consider_timeframes),axis=0)
                 strategy.slice_amount[key] = (candle_prestorage_shape/consider_timeframes)+1
@@ -774,8 +776,7 @@ def indicator_precalculation(dict candles,double [:,::1] first_candles_set,strat
     # print(len(indicator1))
     # print(indicator1.shape[0])
     # print(indicator1_storage)
-    # print(f'candle_count: {candle_count}')
-    # print(date_index.shape[0])
+    # print(f' date index: {date_index.shape[0]}')
     # pd.DataFrame(date_index).to_csv('date_index.csv')
     # pd.DataFrame(partial_array).to_csv('candles.csv')
     # pd.DataFrame(indicator2).to_csv('indicator2.csv')
@@ -809,7 +810,7 @@ def skip_simulator(candles: dict,
     key = f"{config['app']['considering_candles'][0][0]}-{config['app']['considering_candles'][0][1]}"
     first_candles_set = candles[key]['candles']
     length = len(first_candles_set)
-    
+    # print(f' start: {start_date} - finish: {finish_date}')
     # to preset the array size for performance
     store.app.starting_time = first_candles_set[0][0]
     store.app.time = first_candles_set[0][0]
