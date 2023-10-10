@@ -4,10 +4,11 @@ from jesse.services.redis import sync_publish
 import logging
 import os
 import random 
-def uuid4():
-  s = '%032x' % random.getrandbits(128)
-  return s[0:8]+'-'+s[8:12]+'-4'+s[13:16]+'-'+s[16:20]+'-'+s[20:32]
 
+# def uuid4():
+  # s = '%032x' % random.getrandbits(128)
+  # return s[0:8]+'-'+s[8:12]+'-4'+s[13:16]+'-'+s[16:20]+'-'+s[20:32]
+import ruuid as uuid
 # store loggers in the dict because we might want to add more later
 LOGGERS = {}
  
@@ -51,14 +52,14 @@ def create_logger_file(name):
     new_logger.addHandler(logging.FileHandler(log_file, mode='a'))
     LOGGERS[name] = new_logger
     
-def info(msg: str, send_notification=False) -> None:
+def info(msg: str, send_notification=False, webhook=None) -> None:
     if jh.app_mode() not in LOGGERS and (jh.is_live() or (jh.is_backtesting() and jh.is_debugging())):
         _init_main_logger()
 
     msg = str(msg)
     from jesse.store import store
 
-    log_id = uuid4()
+    log_id = uuid.uuid4()
     log_dict = {
         'id': log_id,
         'timestamp': jh.now_to_timestamp(),
@@ -76,7 +77,7 @@ def info(msg: str, send_notification=False) -> None:
         logger.info(msg)
         
     if send_notification:
-        notify(msg)
+        notify(msg, webhook=webhook)
 
 def error(msg: str, send_notification=True) -> None:
     if jh.app_mode() not in LOGGERS:
@@ -88,7 +89,7 @@ def error(msg: str, send_notification=True) -> None:
     msg = str(msg)
     from jesse.store import store
 
-    log_id = uuid4()
+    log_id = uuid.uuid4()
     log_dict = {
         'id': log_id,
         'timestamp': jh.now_to_timestamp(),

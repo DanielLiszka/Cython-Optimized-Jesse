@@ -1,11 +1,12 @@
 # import peewee
 from jesse.services.db import database
 import random
-def uuid4():
-  return '%032x' % random.getrandbits(128)
+# def uuid4():
+  # return '%032x' % random.getrandbits(128)
+import ruuid as uuid
 
 class Ticker():
-    id = uuid4() #peewee.UUIDField(primary_key=True)
+    id = uuid.uuid4() #peewee.UUIDField(primary_key=True)
     # timestamp in milliseconds
     timestamp = int #peewee.BigIntegerField()
     # the latest trades price

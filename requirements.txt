@@ -28,4 +28,6 @@ uvicorn==0.20.0
 websockets==10.4
 python-dotenv==0.21.0
 aiofiles==22.1.0
-cython==3.0.0a11
+cython==3.0.3
+ruuid==0.3.0
+pythran==0.14.0

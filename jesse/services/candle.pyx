@@ -14,7 +14,7 @@ from colorama import Fore, Style
 
 @cython.wraparound(True)
 def generate_candle_from_one_minutes(double [:,::1] array):  
-    cdef Py_ssize_t rows, i  
+    cdef Py_ssize_t rows, i 
     rows = array.shape[0]
     cdef double sum1 = 0.0
     cdef double min1 = INFINITY
@@ -22,7 +22,7 @@ def generate_candle_from_one_minutes(double [:,::1] array):
     cdef double close1, open1, time1
     close1 = array[-1,2] if array[-1,2] == array[-1,2] else NAN
     open1 = array[0,1] if array[0,1] == array[0,1] else NAN
-    time1 = array[0,0]
+    time1 =  array[0,0]
     if close1 is not NAN: 
         for i in range(rows):
             sum1 = sum1 + array[i,5] 

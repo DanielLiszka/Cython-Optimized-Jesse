@@ -1,9 +1,9 @@
 from typing import Union
 import sys
 import random
-def uuid4():
-  s = '%032x' % random.getrandbits(128)
-  return s[0:8]+'-'+s[8:12]+'-4'+s[13:16]+'-'+s[16:20]+'-'+s[20:32]
+# def uuid4():
+  # s = '%032x' % random.getrandbits(128)
+  # return s[0:8]+'-'+s[8:12]+'-4'+s[13:16]+'-'+s[16:20]+'-'+s[20:32]
 import numpy as np
 cimport numpy as np 
 np.import_array()
@@ -15,10 +15,11 @@ from jesse.models import Order, Exchange
 # from jesse.services import logger
 from jesse.utils import sum_floats, subtract_floats
 from libc.math cimport abs,NAN
+import ruuid as uuid
 
 class Position:
     def __init__(self, exchange_name: str, symbol: str, attributes: dict = None) -> None:
-        self.id = uuid4()
+        self.id = uuid.uuid4()
         self.entry_price: float = None
         self.exit_price: float = None
         self.current_price: float = None

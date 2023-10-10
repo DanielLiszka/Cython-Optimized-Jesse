@@ -12,6 +12,7 @@ from pprint import pprint
 from jesse.enums import timeframes,trade_types,sides
 from jesse.exceptions import InvalidTimeframe
 import arrow
+from pathlib import Path
 import click
 from IPython import get_ipython
 from jesse.config import config
@@ -26,12 +27,12 @@ np.import_array()
 DTYPE = np.float64
 ctypedef np.float64_t DTYPE_t
 import random
-from uuid import UUID
+import ruuid as uuid
 CACHED_CONFIG = dict()
 
-def uuid4():
-  s = '%032x' % random.getrandbits(128)
-  return s[0:8]+'-'+s[8:12]+'-4'+s[13:16]+'-'+s[16:20]+'-'+s[20:32]
+# def uuid4():
+  # s = '%032x' % random.getrandbits(128)
+  # return s[0:8]+'-'+s[8:12]+'-4'+s[13:16]+'-'+s[16:20]+'-'+s[20:32]
   
 def app_currency() -> str:
     from jesse.routes import router
@@ -288,7 +289,7 @@ def format_currency(num: float) -> str:
 
 
 def generate_unique_id() -> str:
-    return uuid4()
+    return uuid.uuid4()
 
 
 def get_arrow(timestamp: int) -> arrow.arrow.Arrow:
@@ -405,13 +406,22 @@ def is_optimizing() -> bool:
 def is_paper_trading() -> bool:
     return False #config['app']['trading_mode'] == 'papertrade'
 
-
 def is_unit_testing() -> bool:
-    # config['app']['is_unit_testing'] is only set in the live plugin unit tests
-    return "pytest" in sys.modules #or config['app']['is_unit_testing']
+    """Returns True if the code is running by running pytest, False otherwise."""
+    # Check if the PYTEST_CURRENT_TEST environment variable is set.
+    if os.environ.get("PYTEST_CURRENT_TEST"):
+        return True
+
+    # Check if the code is being executed from the pytest command-line tool.
+    script_name = os.path.basename(sys.argv[0])
+    if script_name in ["pytest", "py.test"]:
+        return True
+
+    # Otherwise, the code is not running by running pytest.
+    return False
 
 
-def is_valid_uuid(uuid_to_test:str, version: int = 4) -> bool:
+def is_valid_uuid(uuid_to_test: str, version: int = 4) -> bool:
     try:
         uuid_obj = uuid.UUID(uuid_to_test, version=version)
         print(uuid_obj)
@@ -480,7 +490,7 @@ def now(force_fresh=False) -> int:
     return int(t*1000)
 
 
-def now_to_timestamp(force_fresh=False) -> int:
+def now_to_timestamp(force_fresh=False):
     if not (is_collecting_data() or is_importing_candles()):
         from jesse.store import store
         return store.app.time
@@ -673,8 +683,13 @@ def round_qty_for_live_mode(roundable_qty: float, precision: int) -> Union[float
     rounded = round_decimals_down(roundable_qty, precision)
 
     for index, q in enumerate(rounded):
+        # if the rounded value is 0, make it the minimum possible value
         if q == 0.0:
-            rounded[index] = 1 / 10 ** precision
+            # if the precision is bigger or equal 0, (for numbers like 2, 0.2, 0.02)
+            if precision >= 0:
+                rounded[index] = 1 / 10 ** precision
+            else:  # for numbers like 20, 200, 2000
+                raise ValueError('qty is too small')
     if input_type in [float, np.float64]:
         return float(rounded[0])
     return rounded
@@ -687,13 +702,16 @@ def round_decimals_down(number: Union[np.ndarray, float], decimals: int = 2) -> 
     cdef long factor 
     if not type(decimals) is int:
       raise TypeError("decimal places must be an integer")
-    elif decimals < 0:
-      raise ValueError("decimal places has to be 0 or more")
     elif decimals == 0:
       return np.floor(number)
 
-    factor = 10 ** decimals
-    return np.floor(number * factor) / factor
+    elif decimals > 0:
+        factor = 10 ** decimals
+        return np.floor(number * factor) / factor
+    elif decimals < 0:
+        # for example, for decimals = -2, we want to round down to the nearest 100 if the number is 1234, we want to return 1200:
+        factor = 10 ** (decimals * -1)
+        return np.floor(number / factor) * factor
 
 
 def same_length(bigger: np.ndarray, shorter: np.ndarray) -> np.ndarray:
@@ -799,15 +817,15 @@ def timeframe_to_one_minutes(timeframe: str) -> int:
             f'Timeframe "{timeframe}" is invalid. Supported timeframes are {", ".join(all_timeframes)}.')
         print("invalid")
 
-def timestamp_to_arrow(timestamp: int) -> arrow.arrow.Arrow:
+def timestamp_to_arrow(timestamp) -> arrow.arrow.Arrow:
     return arrow.get(timestamp / 1000)
 
 
-def timestamp_to_date(timestamp: int) -> str:
+def timestamp_to_date(timestamp) -> str:
     return str(arrow.get(timestamp / 1000))[:10]
 
 
-def timestamp_to_time(timestamp: int) -> str:
+def timestamp_to_time(timestamp) -> str:
     return str(arrow.get(timestamp / 1000))
 
 
@@ -954,12 +972,20 @@ def str_or_none(item, encoding='utf-8'):
         # return item if it's str, if not, decode it using encoding
         if isinstance(item, str):
             return item
+        if type(item) == np.float64:
+            return str(item)
         try:
             return str(item, encoding)
         except TypeError:
             return str(item)
 
-
+def is_price_near(order_price, price_to_compare, threshold_ratio=0.0001):
+    """Check if the given order price is near the specified price."""
+    percentage_threshold = threshold_ratio * price_to_compare
+    # Enforcing a minimum threshold for smaller numbers
+    fixed_threshold = 0.001
+    threshold = max(percentage_threshold, fixed_threshold)
+    return abs(order_price - price_to_compare) < threshold
 
 def cpu_cores_count():
     from multiprocessing import cpu_count
@@ -999,3 +1025,12 @@ def get_candle_start_timestamp_based_on_timeframe(timeframe: str, num_candles_to
     one_min_count = timeframe_to_one_minutes(timeframe)
     finish_date = now(force_fresh=True)
     return finish_date - (num_candles_to_fetch * one_min_count * 60_000)
+    
+def timestamp_to_iso8601(timestamp: int) -> str:
+    # example: 1609804800000 => '2021-01-05T00:00:00.000Z'
+    return arrow.get(timestamp / 1000).isoformat()
+
+
+def iso8601_to_timestamp(iso8601: str) -> int:
+    # example: '2021-01-05T00:00:00.000Z' -> 1609740800000
+    return int(arrow.get(iso8601, 'YYYY-MM-DDTHH:mm:ss.SSSZ').datetime.timestamp()) * 1000

@@ -1,9 +1,9 @@
 import arrow
 import random
-def uuid4():
-  s = '%032x' % random.getrandbits(128)
-  return s[0:8]+'-'+s[8:12]+'-4'+s[13:16]+'-'+s[16:20]+'-'+s[20:32]
-
+# def uuid4():
+  # s = '%032x' % random.getrandbits(128)
+  # return s[0:8]+'-'+s[8:12]+'-4'+s[13:16]+'-'+s[16:20]+'-'+s[20:32]
+import ruuid as uuid
 
 class AppState:
     def __init__(self):
@@ -24,7 +24,7 @@ class AppState:
         Generated and sets session_id. Used to prevent overriding of the session_id
         """
         if self.session_id == '':
-            self.session_id = uuid4()
+            self.session_id = uuid.uuid4()
             
     def clear(self) -> None:
         #resets everything

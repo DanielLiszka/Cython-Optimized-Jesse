@@ -21,6 +21,8 @@ class Broker:
     @staticmethod
     def _validate_qty(qty: float) -> None:
         if qty == 0:
+            # from jesse.config import config 
+            # if not config['app']['optimizing_mode'] == 'optimizing':
             raise InvalidStrategy('qty cannot be 0')
 
     def sell_at_market(self, qty: float) -> Union[Order, None]:
@@ -96,7 +98,8 @@ class Broker:
 
         # MARKET order
         # if the price difference is bellow 0.01% of the current price, then we submit a market order
-        if abs(price - current_price) < 0.0001:
+        # if abs(price - current_price) < 0.0001:
+        if (abs(price - current_price)) < (max(0.0001*current_price,0.001)):
             return self.api.market_order(
                 self.exchange,
                 self.symbol,

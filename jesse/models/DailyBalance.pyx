@@ -1,15 +1,15 @@
 # import peewee
 from jesse.services.db import database
 import random
-def uuid4():
-  return '%032x' % random.getrandbits(128)
-
+# def uuid4():
+  # return '%032x' % random.getrandbits(128)
+import ruuid as uuid
 if database.is_closed():
     database.open_connection()
 
 
 class DailyBalance():
-    id = uuid4()
+    id = uuid.uuid4()
     timestamp = int
     identifier = str = None
     exchange = str

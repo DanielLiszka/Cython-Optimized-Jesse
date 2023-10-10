@@ -4,7 +4,7 @@ import pickle
 from time import time
 from typing import Any
 from functools import lru_cache
-
+import numpy as np 
 import jesse.helpers as jh
 
 
@@ -37,7 +37,7 @@ class Cache:
 
         # add record into the database
         expire_at = None if expire_seconds is None else time() + expire_seconds
-        data_path = f"{self.path}{key}.pickle"
+        data_path = f"{self.path}{key}.npz"
         self.db[key] = {
             'expire_seconds': expire_seconds,
             'expire_at': expire_at,
@@ -47,7 +47,8 @@ class Cache:
 
         # store file
         with open(data_path, 'wb') as f:
-            pickle.dump(data, f, protocol=pickle.HIGHEST_PROTOCOL)
+            np.save(f,data,allow_pickle=True,fix_imports=True)
+            #pickle.dump(data, f, protocol=pickle.HIGHEST_PROTOCOL)
 
     def get_value(self, key: str) -> Any:
         if self.driver is None:
@@ -72,7 +73,7 @@ class Cache:
 
         with open(item['path'], 'rb') as f:
             try:
-                cache_value = pickle.load(f)
+                cache_value = np.load(f,allow_pickle=True)
             except EOFError:
                 # File got broken
                 cache_value = False
@@ -112,7 +113,7 @@ class Cache:
                 self._update_db()
 
             with open(item['path'], 'rb') as f:
-                return pickle.load(f)
+                return np.load(f,allow_pickle=True) #pickle.load(f)
             gc.enable()
         except FileNotFoundError:
             return False 
@@ -165,7 +166,7 @@ class Cache:
                         self._update_db()
                     gc.disable()
                     with open(item['path'], 'rb') as f:
-                        parent_pickles = pickle.load(f)
+                        parent_pickles = np.load(f,allow_pickle=True)
                     gc.enable()
                     slice_len = int((finish_date / 60_000) - (start_date / 60_000))
                     slice_start = int((start_date / 60_000) - (candidate_startdate / 60_000))

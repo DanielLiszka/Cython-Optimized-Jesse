@@ -3,7 +3,7 @@
 #cython:nonecheck=True
 
 from typing import List
-import multiprocess as mp
+import multiprocessing as mp
 import traceback
 from jesse.services.redis import sync_publish, sync_redis
 from jesse.services.failure import terminate_session

@@ -14,9 +14,9 @@ import numpy
 os.environ['CC'] = 'clang'    
 os.environ['LDFLAGS'] = '-fuse-ld=lld'
 os.environ['LDSHARED'] = 'clang -shared'
-os.environ['CFLAGS'] = '-O3 -fuse-ld=lld -fno-openmp -march=native -Wall -mavx -flto=full -DUSE_XSIMD  -I /usr/include/python3.10/Python.h'
+os.environ['CFLAGS'] = '-O3 -fuse-ld=lld -fno-openmp -march=native -Wall -mavx -flto=full -DUSE_XSIMD  -I /usr/include/python3.11/Python.h'
 
-Options.annotate = True
+Options.annotate = False
 Options.convert_range = True
 Options.cache_builtins = True
 Options.cimport_from_pyx = True 
@@ -42,5 +42,8 @@ List = [
 exclusions = ["jesse/__init__.py", "jesse/services/web.pyx"] 
 
 setup(
-    ext_modules=cythonize( List,nthreads=8, force=False, exclude=exclusions,compiler_directives={'language_level':3,'profile':False,'linetrace':False,'binding':False,'infer_types':True,'nonecheck':False,'optimize.use_switch':True,'optimize.unpack_method_calls':True,'initializedcheck':False, 'overflowcheck':False, 'overflowcheck.fold': False, 'cdivision_warnings':True, 'cdivision':True,'wraparound':False,'boundscheck':False,}), include_dirs=[numpy.get_include()]
+    ext_modules=cythonize( List,nthreads=8, force=True, exclude=exclusions,compiler_directives={'language_level':3,'profile':False,
+    'linetrace':False,'binding':False,'infer_types':True,'nonecheck':False,'optimize.use_switch':True,'optimize.unpack_method_calls':True,
+    'initializedcheck':False, 'overflowcheck':False, 'overflowcheck.fold': False, 'cdivision_warnings':True, 'cdivision':True,'wraparound':False,
+    'boundscheck':False,}), include_dirs=[numpy.get_include(), pythran.get_include()]
 )

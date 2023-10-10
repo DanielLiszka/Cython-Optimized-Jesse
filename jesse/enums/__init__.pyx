@@ -70,7 +70,9 @@ class exchanges:
     FTX_SPOT = 'FTX Spot'
     FTX_US_SPOT = 'FTX US Spot'
     POLYGON_STOCKS = 'Polygon_Stocks'
-	POLYGON_FOREX = 'Polygon_Forex'
+    POLYGON_FOREX = 'Polygon_Forex'
+    DYDX_PERPETUAL = "Dydx Perpetual"
+    DYDX_PERPETUAL_TESTNET = "Dydx Perpetual Testnet"
 
 class migration_actions:
     ADD = 'add'

@@ -101,7 +101,7 @@ def get_fitness(
             logger.log_optimize_mode(f'Score is nan. DNA is invalid')
             score = 0.0001
         else:
-            logger.log_optimize_mode(f"DNA is usable => {ratio_config}: {round(ratio, 2)}, total: {training_data_metrics['total']}, PNL%: {round(training_data_metrics['net_profit_percentage'], 2)}%, win-rate: {round(training_data_metrics['win_rate']*100, 2)}%")
+            logger.log_optimize_mode(f"Name: {dna} -  DNA is usable => {ratio_config}: {round(ratio, 2)}, total: {training_data_metrics['total']}, PNL%: {round(training_data_metrics['net_profit_percentage'], 2)}%, win-rate: {round(training_data_metrics['win_rate']*100, 2)}%")
         # run backtest simulation
         testing_data_metrics = isolated_backtest(
             _formatted_inputs_for_isolated_backtest(optimization_config, routes),

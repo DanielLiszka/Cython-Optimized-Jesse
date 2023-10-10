@@ -23,44 +23,47 @@ First, install the necessary python packages listed in the "requirements.txt" vi
 
 ## Benchmark
 
-Iteration times for multiple timeframes were recorded for a backtest using the example [SMACrossover](https://github.com/jesse-ai/example-strategies/blob/master/SMACrossover/__init__.py) strategy on the Bitfinex exchange with the BTC-USD pair from 2018-01-01 - 2022-11-01
+Iteration times for multiple timeframes were recorded for a backtest using the example [SMACrossover](https://github.com/jesse-ai/example-strategies/blob/master/SMACrossover/__init__.py) strategy on the Bitfinex exchange with the BTC-USD pair from 2018-01-01 - 2023-09-01
 ##### Original 
 
 ```bash
-5m : 71.56 seconds
-15m : 57.25 seconds
-30m : 52.78 seconds
-45m : 50.77 seconds
-1h : 51.09 seconds
-2h : 49.87 seconds
-3h : 49.15 seconds
-4h : 49.81 seconds
+3m : 96.39 seconds 
+5m : 77.32 seconds
+15m : 61.08 seconds
+30m : 57.41 seconds
+45m : 56.57 seconds
+1h : 54.30 seconds
+2h : 53.50 seconds
+3h : 52.93 seconds
+4h : 52.23 seconds
 ```
 
 ##### Optimized (Without Indicator Precalculation)
 
 ```bash
-5m : 7.92 seconds
-15m : 3.11 seconds
-30m : 1.74 seconds
-45m : 1.29 seconds
-1h : 1.13 seconds 
-2h : 0.71 seconds
-3h : 0.60 seconds
-4h : 0.57 seconds
+3m : 16.08 seconds 
+5m : 9.91 seconds
+15m : 3.36 seconds
+30m : 1.79 seconds
+45m : 1.26 seconds
+1h : 0.99 seconds 
+2h : 0.58 seconds
+3h : 0.45 seconds
+4h : 0.38 seconds
 ```
 
 ##### Optimized (With Indicator Precalculation and Preloaded Candles)
 
 ```bash
-5m : 2.56 seconds
-15m : 0.95 seconds 
-30m : 0.51 seconds
-45m : 0.39 seconds
+3m : 4.28 seconds 
+5m : 2.59 seconds
+15m : 0.94 seconds 
+30m : 0.53 seconds
+45m : 0.40 seconds
 1h : 0.31 seconds
-2h : 0.21 seconds
-3h : 0.17 seconds
-4h : 0.16 seconds
+2h : 0.22 seconds
+3h : 0.18 seconds
+4h : 0.17 seconds
 ```
 
 ## Acknowledgements

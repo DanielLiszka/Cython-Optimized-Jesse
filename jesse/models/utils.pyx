@@ -1,9 +1,9 @@
 import threading
 import numpy as np
 import random
-def uuid4():
-  s = '%032x' % random.getrandbits(128)
-  return s[0:8]+'-'+s[8:12]+'-4'+s[13:16]+'-'+s[16:20]+'-'+s[20:32]
+# def uuid4():
+  # s = '%032x' % random.getrandbits(128)
+  # return s[0:8]+'-'+s[8:12]+'-4'+s[13:16]+'-'+s[16:20]+'-'+s[20:32]
 import jesse.helpers as jh
 from jesse.services import logger
 from jesse.models.Candle import Candle
@@ -16,11 +16,12 @@ from jesse.models.DailyBalance import DailyBalance
 from jesse.models.Candle import Candle
 from jesse.models.Orderbook import Orderbook
 from jesse.models.Trade import Trade
+import ruuid as uuid
 
 def store_candle_into_db(exchange: str, symbol: str, candle: np.ndarray, on_conflict='ignore') -> None:
 
     d = {
-        'id': uuid4(),
+        'id': uuid.uuid4(),
         'symbol': symbol,
         'exchange': exchange,
         'timestamp': candle[0],
@@ -68,7 +69,7 @@ def store_ticker_into_db(exchange: str, symbol: str, ticker: np.ndarray) -> None
     return
 
     d = {
-        'id': uuid4(),
+        'id': uuid.uuid4(),
         'timestamp': ticker[0],
         'last_price': ticker[1],
         'high_price': ticker[2],
@@ -167,7 +168,7 @@ def store_trade_into_db(exchange: str, symbol: str, trade: np.ndarray) -> None:
     return
 
     d = {
-        'id': uuid4(),
+        'id': uuid.uuid4(),
         'timestamp': trade[0],
         'price': trade[1],
         'buy_qty': trade[2],
@@ -195,7 +196,7 @@ def store_orderbook_into_db(exchange: str, symbol: str, orderbook: np.ndarray) -
     return
 
     d = {
-        'id': uuid4(),
+        'id': uuid.uuid4(),
         'timestamp': jh.now_to_timestamp(),
         'data': orderbook.dumps(),
         'symbol': symbol,

@@ -1,15 +1,17 @@
 from abc import ABC, abstractmethod
 from time import sleep
 from typing import List, Dict, Union
+from enum import Enum
 import sys
 from jesse.config import config
 import numpy as np
 cimport numpy as np 
 cimport cython
 np.import_array()
-from libc.math cimport abs, NAN
 
-import random
+from libc.math cimport NAN, fmaxf, fabsf
+
+import random  
 import jesse.helpers as jh
 import jesse.services.logger as logger
 import jesse.services.selectors as selectors
@@ -23,14 +25,24 @@ from jesse.services.cache import cached
 from jesse.services import notifier
 from jesse.enums import order_statuses
 from jesse.routes import router
-DTYPE = np.float64
-ctypedef np.float64_t DTYPE_t
+# from gym import spaces, Space
+import ruuid as uuid
 
-# cdef class ABC():
-    # cdef int x 
+DTYPE = np.float64
+ctypedef np.float64_t DTYPE_t   
+
+from cpython cimport * 
+cdef extern from "Python.h":
+        Py_ssize_t PyList_GET_SIZE(object list)
+        PyObject* PyList_GET_ITEM(object list, Py_ssize_t i)
+        void PyList_SET_ITEM(object list, Py_ssize_t i, object o)
+        list PyList_New(Py_ssize_t len)       
+
 # @cython.boundscheck(False)
 # @cython.wraparound(False)
-cdef inline bint arr_equal(double [:,::1] a1, double [:,::1] a2):
+#cython: np_pythran=True
+
+cdef inline bint arr_equal(double [:,::1] a1, double [:,::1] a2) nogil noexcept:
     if a1.shape[0] != a2.shape[0]:
         return False
     cdef Py_ssize_t rows, columns
@@ -45,9 +57,9 @@ cdef inline bint arr_equal(double [:,::1] a1, double [:,::1] a2):
     
 # def arr_equal(np.ndarray a1, np.ndarray a2):
     # return np.array_equal(a1,a2)
-def uuid4():
-  s = '%032x' % random.getrandbits(128)
-  return s[0:8]+'-'+s[8:12]+'-4'+s[13:16]+'-'+s[16:20]+'-'+s[20:32]
+# def uuid4():
+  # s = '%032x' % random.getrandbits(128)
+  # return s[0:8]+'-'+s[8:12]+'-4'+s[13:16]+'-'+s[16:20]+'-'+s[20:32]
   
 class Strategy(ABC):
     """
@@ -55,12 +67,12 @@ class Strategy(ABC):
     """
 
     def __init__(self) -> None:
-        self.id = uuid4()
+        self.id = uuid.uuid4()
         self.name = None
         self.symbol = None
         self.exchange = None
         self.timeframe = None
-        self.hp = None
+        self.hp = None 
         self.full_path_name = None
         self.full_name = None
         self.index:int  = 0
@@ -80,8 +92,8 @@ class Strategy(ABC):
         self.take_profit = None
         self._take_profit = None
 
-        self._executed_open_orders = []
-        self._executed_close_orders = []
+        self._executed_open_orders:list = []
+        self._executed_close_orders:list = []
         
         self._indicator1_value = None
         self._indicator2_value = None 
@@ -104,9 +116,9 @@ class Strategy(ABC):
         self.position: Position = None
         self.broker = None
 
-        self._cached_methods = {}
-        self._cached_metrics = {}
-        self.slice_amount = {}
+        self._cached_methods:dict = {}
+        self._cached_metrics:dict = {}
+        self.slice_amount:dict = {}
         
     def update_new_candle(self, candle, exchange, symbol, timeframe):
         pass
@@ -187,16 +199,16 @@ class Strategy(ABC):
 
         # call the relevant strategy event handler:
         # if opening position
-        if abs(before_qty) <= abs(self.position._min_qty) < abs(after_qty):
+        if fabsf(before_qty) <= fabsf(self.position._min_qty) < fabsf(after_qty):
             effect = 'opening_position'
         # if closing position
-        elif abs(before_qty) > abs(self.position._min_qty) >= abs(after_qty):
+        elif fabsf(before_qty) > fabsf(self.position._min_qty) >= fabsf(after_qty):
             effect = 'closing_position'
         # if increasing position size
-        elif abs(after_qty) > abs(before_qty):
+        elif fabsf(after_qty) > fabsf(before_qty):
             effect = 'increased_position'
         # if reducing position size
-        else: # abs(after_qty) < abs(before_qty):
+        else: # fabsf(after_qty) < fabsf(before_qty):
             effect = 'reduced_position'
 
         # call the relevant strategy event handler:
@@ -278,9 +290,17 @@ class Strategy(ABC):
         
     def _submit_buy_orders(self) -> None:
         cdef float price_to_compare = self.position.current_price
+        # if jh.is_livetrading():
+            # price_to_compare = jh.round_price_for_live_mode(
+                # self.price,
+                # selectors.get_exchange(self.exchange).vars['precisions'][self.symbol]['price_precision']
+            # )
+        # else:
+            # price_to_compare = self.price
         for o in self._buy:
             # MARKET order
-            if abs(o[1] - price_to_compare) < 0.0001:
+            # if fabsf(o[1] - price_to_compare) < 0.0001:
+            if (fabsf(o[1] - price_to_compare)) < (fmaxf(0.0001*price_to_compare,0.001)):
                 self.broker.buy_at_market(o[0])
             # STOP order
             elif o[1] > price_to_compare:
@@ -293,9 +313,17 @@ class Strategy(ABC):
 
     def _submit_sell_orders(self) -> None:
         cdef float price_to_compare = self.position.current_price
+        # if jh.is_livetrading():
+            # price_to_compare = jh.round_price_for_live_mode(
+                # self.price,
+                # selectors.get_exchange(self.exchange).vars['precisions'][self.symbol]['price_precision']
+            # )
+        # else:
+            # price_to_compare = self.price
         for o in self._sell:
             # MARKET order
-            if abs(o[1] - price_to_compare) < 0.0001:
+            # if fabsf(o[1] - price_to_compare) < 0.0001:
+            if (fabsf(o[1] - price_to_compare)) < (fmaxf(0.0001*price_to_compare,0.001)):
                 self.broker.sell_at_market(o[0])
             # STOP order
             elif o[1] < price_to_compare:
@@ -512,6 +540,7 @@ class Strategy(ABC):
         # after _wait_until_executing_orders_are_fully_handled, the position might have closed, so:
         if self.position.qty == 0 :
             return
+            
         self.update_position()
 
         self._detect_and_handle_entry_and_exit_modifications()
@@ -561,7 +590,7 @@ class Strategy(ABC):
                     self._take_profit = self.take_profit.copy()
 
                     # if there's only one order in self._stop_loss, then it could be a liquidation order, store its price
-                    if len(self._take_profit) == 1:
+                    if PyList_GET_SIZE(self._take_profit) == 1:
                         temp_current_price = self.price
                     else:
                         temp_current_price = None
@@ -595,7 +624,7 @@ class Strategy(ABC):
                     self._stop_loss = self.stop_loss.copy()
                     
                     # if there's only one order in self._stop_loss, then it could be a liquidation order, store its price
-                    if len(self._stop_loss) == 1:
+                    if PyList_GET_SIZE(self._stop_loss) == 1:
                         temp_current_price = self.price
                     else:
                         temp_current_price = None
@@ -633,9 +662,6 @@ class Strategy(ABC):
             raise exceptions.InvalidStrategy(
                 'stop-loss and take-profit should not be exactly the same. Just use either one of them and it will do.')
 
-    def test_func(self) -> None: 
-        self.counter += 1 
-        print(self.counter)
         
     def update_position(self) -> None:
         pass
@@ -658,15 +684,18 @@ class Strategy(ABC):
         #self._wait_until_executing_orders_are_fully_handled()
             
         # should cancel entry?
-        if len(self.entry_orders) and self.position.qty == 0  and self.should_cancel_entry():
+        if PyList_GET_SIZE(self.entry_orders) > 0 and self.position.qty == 0  and self.should_cancel_entry():
             self._execute_cancel()
 
         # update position
         if self.position.qty != 0:
-            self._update_position()
+            # self._update_position()
+            self.update_position()
+            self._detect_and_handle_entry_and_exit_modifications()
             
         if config['app']['trading_mode'] == 'backtest' or "pytest" in sys.modules:
-            store.orders.execute_pending_market_orders()
+            if PyList_GET_SIZE(store.orders.to_execute) > 0:
+                store.orders.execute_pending_market_orders()
 
         # should_long and should_short
         if self.position.qty == 0 and self.entry_orders == []:
@@ -694,7 +723,8 @@ class Strategy(ABC):
         Simulate market order execution in backtest mode
         """
         if jh.is_backtesting() or jh.is_unit_testing():
-            store.orders.execute_pending_market_orders()
+            if PyList_GET_SIZE(store.orders.to_execute) > 0:
+                store.orders.execute_pending_market_orders()
             
     def _on_open_position(self, order: Order) -> None:
         self.increased_count = 1
@@ -837,29 +867,14 @@ class Strategy(ABC):
         pass
 
     # @cython.wraparound(True)
-    def _execute(self, indicator1=None, indicator2=None, indicator3= None,  indicator4=None, indicator5=None, indicator6=None, indicator7=None, indicator8=None, indicator9=None, indicator10=None, bint precalc_bool=False, bint precalc_test=False) -> None:
+    def _execute(self) -> None:
         """
         Handles the execution permission for the strategy.
         """
         # make sure we don't execute this strategy more than once at the same time.
         if self._is_executing is True:
             return
-            
-        if precalc_bool:
-            self._indicator1_value = indicator1
-            self._indicator2_value = indicator2
-            self._indicator3_value = indicator3
-            self._indicator4_value = indicator4
-            self._indicator5_value = indicator5
-            self._indicator6_value = indicator6
-            self._indicator7_value = indicator7 
-            self._indicator8_value = indicator8
-            self._indicator9_value = indicator9
-            self._indicator10_value = indicator10
-            
-        if precalc_test and precalc_bool:
-            self.check_precalculated_indicator_accuracy(indicator1,indicator2,indicator3,indicator4,indicator5,indicator6,indicator7,indicator8,indicator9,indicator10)
-            
+                 
         self._is_executing = True
 
         self.before()
@@ -904,7 +919,7 @@ class Strategy(ABC):
             self.terminate()
             return
 
-        if len(self.entry_orders):
+        if PyList_GET_SIZE(self.entry_orders) > 0:
             self._execute_cancel()
             # logger.info('Canceled open-position orders because we reached the end of the backtest session.')
             
@@ -937,8 +952,8 @@ class Strategy(ABC):
 
         :return: np.ndarray
         """
-        return store.candles.get_current_candle(self.exchange, self.symbol, self.timeframe).copy()
-
+        return store.candles.get_current_candle(self.exchange, self.symbol, self.timeframe).copy() 
+        
     @property
     def open(self) -> float:
         """
@@ -960,7 +975,7 @@ class Strategy(ABC):
         return self.current_candle[2]
 
     @property
-    def price(self) -> float:
+    def price(self) -> float:   
         """
         Same as self.close, except in livetrde, this is rounded as the exchanges require it.
 
@@ -968,6 +983,7 @@ class Strategy(ABC):
             [float] -- the current trading candle's current(close) price
         """
         return self.position.current_price
+        # return self.current_candle[2]
 
     @property
     def high(self) -> float:
@@ -975,7 +991,7 @@ class Strategy(ABC):
         Returns the highest price of the current candle for this strategy.
         Just as a helper to use when writing super simple strategies.
         Returns:
-            [float] -- the current trading candle's HIGH price
+            [float] -- the current trading candle's HIGH price 
         """
         return self.current_candle[3]
 
@@ -1008,7 +1024,7 @@ class Strategy(ABC):
 
         :return: np.ndarray
         """
-        return store.candles.get_candles(exchange, symbol, timeframe)
+        return store.candles.get_candles(exchange, symbol, timeframe) if not self.preload_candles else store.candles.storage[f'{self.exchange}-{self.symbol}-{self.timeframe}'].array[0:self.slice_amount[f'{self.exchange}-{self.symbol}-{self.timeframe}'] + self.index]
 
     @property
     def metrics(self) -> dict:
@@ -1146,7 +1162,7 @@ class Strategy(ABC):
     def average_open_price(self) -> float:
         executed = [[o.qty, o.price] for o in self._executed_open_orders] + [[o.qty, o.price] for o in self._entry_orders if o.is_executed]
         arr = self._convert_to_numpy_array(executed, 'self.average_open_price')
-        if len(arr.shape) != 2:
+        if PyList_GET_SIZE(arr.shape) != 2:
             return None
         else:
             return (np.abs(arr[:, 0] * arr[:, 1])).sum() / np.abs(arr[:, 0]).sum()
@@ -1154,7 +1170,7 @@ class Strategy(ABC):
     def average_close_price(self) -> float:
         executed = [[o.qty, o.price] for o in self._executed_close_orders] + [[o.qty, o.price] for o in self._exit_orders if o.is_executed]
         arr = self._convert_to_numpy_array(executed, 'average_close_price')
-        if len(arr.shape) != 2:
+        if PyList_GET_SIZE(arr.shape) != 2:
             return None
         else:
             return (np.abs(arr[:, 0] * arr[:, 1])).sum() / np.abs(arr[:, 0]).sum()
@@ -1206,11 +1222,11 @@ class Strategy(ABC):
         return self.position.liquidation_price
 
     @staticmethod
-    def log(msg: str, log_type: str = 'info', send_notification: bool = False) -> None:
+    def log(msg: str, log_type: str = 'info', send_notification: bool = False, webhook: str = None) -> None:
         msg = str(msg)
 
         if log_type == 'info':
-            logger.info(msg, send_notification=jh.is_live() and send_notification)
+            logger.info(msg, send_notification=jh.is_live() and send_notification, webhook=webhook)
 
         elif log_type == 'error':
             logger.error(msg, send_notification=jh.is_live() and send_notification)
@@ -1269,22 +1285,36 @@ class Strategy(ABC):
         Returns all the entry orders for this position.
         """
         cdef list entry_orders, all_orders
+        cdef Py_ssize_t all_orders_len, i 
         key = f'{self.exchange}-{self.symbol}'
         all_orders = store.orders.storage.get(key, [])
-        if len(all_orders) == 0:
+        all_orders_len = PyList_GET_SIZE(all_orders)
+        if all_orders_len == 0:
             return []
         p = store.positions.storage.get(key, None)
         cdef double c_qty = p.qty 
         if c_qty == 0 : 
             entry_orders = all_orders.copy()
         else:
-            if c_qty > 0:
-                entry_orders = [o for o in all_orders if (o.side == sides.BUY and not o.status == order_statuses.CANCELED)]
+            # entry_orders = [o for o in all_orders if o.side == jh.type_to_side(p.type)]    
+            
+            entry_orders = []
+            if c_qty > 0: 
+                for i in range(all_orders_len):
+                    if (all_orders[i].side == sides.BUY and not all_orders[i].status == order_statuses.CANCELED):
+                        entry_orders.append(all_orders[i])
+                    
+                # entry_orders = [o for o in all_orders if (o.side == sides.BUY and not o.status == order_statuses.CANCELED)]
             elif c_qty < 0:
-                entry_orders = [o for o in all_orders if (o.side == sides.SELL and not o.status == order_statuses.CANCELED)]
+                for i in range(all_orders_len):
+                    if (all_orders[i].side == sides.SELL and not all_orders[i].status == order_statuses.CANCELED):
+                        entry_orders.append(all_orders[i])
+                        
+                # entry_orders = [o for o in all_orders if (o.side == sides.SELL and not o.status == order_statuses.CANCELED)]
         
         # exclude cancelled orders
         # entry_orders = [o for o in entry_orders if not o.is_canceled]
+        
         return entry_orders #store.orders.get_entry_orders(self.exchange, self.symbol)
 
     @property
@@ -1312,56 +1342,110 @@ class Strategy(ABC):
         return store.app.daily_balance
      
     @cython.wraparound(True)
-    def check_precalculated_indicator_accuracy(self,indicator1,indicator2,indicator3,indicator4,indicator5,indicator6,indicator7,indicator8,indicator9,indicator10):
+    def check_precalculated_indicator_accuracy(self):
         round_num = 7
-        if indicator10 is not None:
+        if self._indicator10_value is not None:
             try:
                 assert round(self._indicator10_value[-1],round_num) == round(self._indicator10_test[-1],round_num)
             except AssertionError,error:
                 print(f'stored value10: {round(self._indicator10_value[-1],round_num)} != { round(self._indicator10_test[-1],round_num)}')
-        if indicator9 is not None:
+        if self._indicator9_value is not None:
             try:
                 assert round(self._indicator9_value[-1],round_num) == round(self._indicator9_test[-1],round_num)
             except AssertionError,error:
                 print(f'stored value9: {round(self._indicator9_value[-1],round_num)} != { round(self._indicator9_test[-1],round_num)}') 
-        if indicator8 is not None:
+        if self._indicator8_value is not None:
             try:
                 assert round(self._indicator8_value[-1],round_num) == round(self._indicator8_test[-1],round_num)
             except AssertionError,error:
                 print(f'stored value8: {round(self._indicator8_value[-1],round_num)} != { round(self._indicator8_test[-1],round_num)}')   
-        if indicator7 is not None:        
+        if self._indicator7_value is not None:        
             try:
                 assert round(self._indicator7_value[-1],round_num) == round(self._indicator7_test[-1],round_num)
             except AssertionError,error:
                 print(f'stored value7: {round(self._indicator7_value[-1],round_num)} != { round(self._indicator7_test[-1],round_num)}')
-        if indicator6 is not None:
+        if self._indicator6_value is not None:
             try:
                 assert round(self._indicator6_value[-1],round_num) == round(self._indicator6_test[-1],round_num)
             except AssertionError,error:
                 print(f'stored value6: {round(self._indicator6_value[-1],round_num)} != { round(self._indicator6_test[-1],round_num)}')
-        if indicator5 is not None:
+        if self._indicator5_value is not None:
             try:
                 assert round(self._indicator5_value[-1],round_num) == round(self._indicator5_test[-1],round_num)
             except AssertionError,error:
                 print(f'stored value5: {round(self._indicator5_value[-1],round_num)} != { round(self._indicator5_test[-1],round_num)}')
-        if indicator4 is not None:
+        if self._indicator4_value is not None:
             try:
                 assert round(self._indicator4_value[-1],round_num) == round(self._indicator4_test[-1],round_num)
             except AssertionError,error:
                 print(f'stored value4: {round(self._indicator4_value[-1],round_num)} != { round(self._indicator4_test[-1],round_num)}')
-        if indicator3 is not None:
+        if self._indicator3_value is not None:
             try:
                 assert round(self._indicator3_value[-1],round_num) == round(self._indicator3_test[-1],round_num)
             except AssertionError,error:
                 print(f'stored value3: {round(self._indicator3_value[-1],round_num)} != { round(self._indicator3_test[-1],round_num)}')
-        if indicator2 is not None:
+        if self._indicator2_value is not None:
             try:
                 assert round(self._indicator2_value[-1],round_num) == round(self._indicator2_test[-1],round_num)
             except AssertionError,error:
                 print(f'stored value2: {round(self._indicator2_value[-1],round_num)} != { round(self._indicator2_test[-1],round_num)}')
-        if indicator1 is not None:
+        if self._indicator1_value is not None:
            try:
                 assert round(self._indicator1_value[-1],round_num) == round(self._indicator1_test[-1],round_num)
            except AssertionError,error:
                 print(f'stored value1: {round(self._indicator1_value[-1],round_num)} != { round(self._indicator1_test[-1],round_num)}')
             
+            
+    # def _gym_execute_before(self) -> None:
+        # """
+        # Split _execute method to 2. _gym_execute_before and _gym_execute
+        # This way outside algorithm can inspect & inject such as a RL algorithm.
+        # The inspection made using env_observation and injection will with agent_action.
+        # """
+        # if self._is_executing is True:
+            # return
+
+        # self._is_executing = True
+
+        # self.before()
+
+    # def _gym_execute(self) -> None:
+        # """
+        # Continue the _execute logic from _gym_execute_before method.
+        # """
+        # self._check()
+        # self.after()
+        # self._clear_cached_methods()
+
+        # self._is_executing = False
+        # self.index += 1
+
+    # def observation_space(self) -> Space:
+        # return spaces.Box(
+            # low=-1, high=1,
+            # shape=(1,),
+            # dtype=np.int8
+        # )
+
+    # def env_observation(self):
+        # """
+        # get called in JessGymEnv class to get from the strategy what the user wants the RL will look like.
+        # Make sure its like env_observation_space shape.
+        # """
+        # return []
+
+    # def agent_action(self, action):
+        # pass
+
+    # def _agent_action(self, action: int):
+        # """
+        # translate the action
+        # """
+        # action = self.action_space()[action]
+        # return self.agent_action(action)
+
+    # def action_space(self) -> List[Enum]:
+        # return [None]
+
+    # def reward(self) -> float:
+        # return 0.0

@@ -2,9 +2,9 @@
 
 from jesse.config import config
 import random
-def uuid4():
-  s = '%032x' % random.getrandbits(128)
-  return s[0:8]+'-'+s[8:12]+'-4'+s[13:16]+'-'+s[16:20]+'-'+s[20:32]
+# def uuid4():
+  # s = '%032x' % random.getrandbits(128)
+  # return s[0:8]+'-'+s[8:12]+'-4'+s[13:16]+'-'+s[16:20]+'-'+s[20:32]
 from libc.math cimport abs, NAN
 import jesse.helpers as jh
 from jesse.config import config
@@ -17,11 +17,20 @@ from numpy cimport ndarray as ar
 np.import_array()
 DTYPE = np.float64
 ctypedef np.float64_t DTYPE_t
+import ruuid as uuid
 
+cdef inline double cython_sum(double[:] y) noexcept nogil:   
+    cdef Py_ssize_t N = y.shape[0]
+    cdef double x = y[0]
+    cdef Py_ssize_t i
+    for i in range(1,N):
+        x += y[i]
+    return x
+    
 class ClosedTrade():
     """A trade is made when a position is opened AND closed."""
 
-    id: str = uuid4() # peewee.UUIDField(primary_key=True)
+    id: str = uuid.uuid4() # peewee.UUIDField(primary_key=True)
     strategy_name: str #peewee.CharField()
     symbol:str  # peewee.CharField()
     exchange: str #peewee.CharField()
@@ -132,7 +141,7 @@ class ClosedTrade():
         return self.entry_price * abs(self.qty) / self.leverage
 
     @property
-    def holding_period(self) -> int:
+    def holding_period(self):
         """How many SECONDS has it taken for the trade to be done."""
         return (self.closed_at - self.opened_at) / 1000
         
@@ -163,25 +172,20 @@ class ClosedTrade():
             return NAN
 
         return cython_sum((orders[:, 0] * orders[:, 1])) / cython_sum(orders[:, 0])
-
+        # return (orders[:, 0] * orders[:, 1]).sum() / orders[:, 0].sum()
     @property
     def exit_price(self) -> float:
         if self.type == trade_types.LONG:
             orders = self.sell_orders.array
-        elif self.type == trade_types.SHORT:
+        elif self.type == trade_types.SHORT:   
             orders = self.buy_orders.array
         else:
             return NAN
 
         return cython_sum((orders[:, 0] * orders[:, 1])) / cython_sum(orders[:, 0])
+        # return (orders[:, 0] * orders[:, 1]).sum() / orders[:, 0].sum()
 
-cdef double cython_sum(np.ndarray[DTYPE_t, ndim=1] y):
-    cdef Py_ssize_t N = y.shape[0]
-    cdef double x = y[0]
-    cdef Py_ssize_t i
-    for i in range(1,N):
-        x += y[i]
-    return x
+
     
 class DynamicNumpyArray:
     def __init__(self, shape: tuple,int index = -1, attributes: dict = None):

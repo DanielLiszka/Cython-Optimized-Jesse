@@ -7,13 +7,17 @@ from jesse.models import Order
 from jesse.enums import order_statuses
 # from jesse.services import selectors
 import jesse.helpers as jh
+from cpython cimport * 
+
+cdef extern from "Python.h":
+        Py_ssize_t PyList_GET_SIZE(object list)
 
 class OrdersState:
     def __init__(self) -> None:
         # used in simulation only
-        self.to_execute = []
+        self.to_execute:list = []
 
-        self.storage = {}
+        self.storage:dict = {}
 
         for exchange in config['app']['trading_exchanges']:
             for symbol in config['app']['trading_symbols']:
@@ -45,8 +49,8 @@ class OrdersState:
         ]
 
     def execute_pending_market_orders(self) -> None:
-        if not self.to_execute:
-            return
+        # if PyList_GET_SIZE(self.to_execute) == 0:
+            # return
 
         for o in self.to_execute:
             o.execute()
@@ -60,7 +64,10 @@ class OrdersState:
     def get_orders(self, exchange, symbol) -> List[Order]:
         key = f'{exchange}-{symbol}'
         return self.storage.get(key, [])
-
+        
+    def get_all_orders(self, exchange: str) -> List[Order]:
+        return [o for key in self.storage for o in self.storage[key] if o.exchange == exchange]
+        
     def count_all_active_orders(self) -> int:
         cdef Py_ssize_t c 
         c = 0

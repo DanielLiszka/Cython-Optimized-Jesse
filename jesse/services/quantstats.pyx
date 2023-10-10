@@ -31,7 +31,7 @@ def quantstats_tearsheet(buy_and_hold_returns: pd.Series, study_name: str, optun
     else:
         with open("optuna_config.yml", "r") as ymlfile:
             cfg = yaml.load(ymlfile, yaml.SafeLoader)
-        path_name = f'{path_name}-{cfg["optimizer"]}'
+        path_name = f'{path_name}-{cfg["optimizer"]}-{len(cfg["route"].items())} Pairs'
         file_path = f"./storage/jesse-optuna/validation_metrics/{path_name}/{study_name} QuantStats Report.html"
 
     title = f"{modes[mode][1]} → {arrow.utcnow().strftime('%d %b, %Y %H:%M:%S')} → {study_name}"
