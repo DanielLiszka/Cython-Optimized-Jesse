@@ -1,7 +1,6 @@
 import math
 import time
-from datetime import timedelta
-from datetime import datetime,timezone
+from datetime import datetime,timezone, timedelta,date
 from typing import Dict, List, Any, Union
 
 import numpy as np 
@@ -22,7 +21,8 @@ from jesse.services.cache import cache
 from jesse.store import store
 from jesse import exceptions
 from jesse.services.progressbar import Progressbar
-
+from jesse.modes.import_candles_mode.drivers.polygon_stocks import Polygon_Stocks
+from jesse.config import config 
 
 def run(
         exchange: str,
@@ -48,39 +48,57 @@ def run(
     database.open_connection()
     
     if exchange in {'Polygon_Stocks','Polygon_Forex'}:
-        base = jh.base_asset(symbol)
-        formatedticker = f'{base}-USD'
-        df = pd.read_csv(f'/mnt/g/Algotrading_2nd_location/stock_data_bars/{base}.csv', sep=',', skiprows=1, header=None)
-        data = df.to_numpy()
-        candles = []
-        for d in data:
-            candles.append({
-                'id': jh.generate_unique_id(),
-                'symbol': formatedticker,
-                'exchange': 'Polygon_Stocks',
-                'timestamp': int(d[0]),
-                'open': float(d[1]) if d[1] == d[1] else np.nan,
-                'close': float(d[2]) if d[2] == d[2] else np.nan,
-                'high': float(d[3]) if d[3] == d[3] else np.nan,
-                'low': float(d[4]) if d[4] == d[4] else np.nan,
-                'volume': int(d[5]) if d[5] == d[5] else np.nan
+
+        # if exchange == "Polygon_Forex":
+            
+        
+            
+        if exchange == "Polygon_Stocks":
+            status_checker = Timeloop()
+
+            @status_checker.job(interval=timedelta(seconds=1))
+            def handle_time():
+                if process_status() != 'started':
+                    raise exceptions.Termination
+
+            status_checker.start()
+            base = jh.base_asset(symbol)
+            formatedticker = f'{base}-USD'
+            client = Polygon_Stocks(auth_key = (config['env']['API_Keys']['Polygon']['api_key']))
+            tickers = client.get_tickers(market='stocks')
+            if str(base) not in tickers:
+                raise Exception("Ticker Not Found")
+            start = start_date_str.split('-')
+            start = datetime(int(start[0]),int(start[1]),int(start[2]))
+            client.get_bars(market='stocks',ticker=base,from_=start,to=date.today())
+            
+            df = pd.read_csv(f'storage/temp/stock bars/{base}.csv', sep=',', skiprows=1, header=None)
+            data = df.to_numpy()
+            candles = []
+            for d in data:
+                candles.append({
+                    'id': jh.generate_unique_id(),
+                    'symbol': formatedticker,
+                    'exchange': 'Polygon_Stocks',
+                    'timestamp': int(d[0]),
+                    'open': float(d[1]) if d[1] == d[1] else np.nan,
+                    'close': float(d[2]) if d[2] == d[2] else np.nan,
+                    'high': float(d[3]) if d[3] == d[3] else np.nan,
+                    'low': float(d[4]) if d[4] == d[4] else np.nan,
+                    'volume': int(d[5]) if d[5] == d[5] else np.nan
+                })
+            key =  f'{exchange}-{symbol}'
+            yesterday = datetime.now() - timedelta(1)
+            yesterday = yesterday.strftime('%Y-%m-%d')
+            cache_key = f"{start_date_str}-{yesterday}-{key}"
+
+            candles_tuple = candles
+            cache.set_value(cache_key, tuple(candles_tuple), expire_seconds=60 * 60 * 24 * 7)    
+            sync_publish('alert', {
+                'message': f'Successfully imported candles since {start} until {yesterday} ). ',
+                'type': 'success'
             })
-        key =  f'{exchange}-{symbol}'
-        # print(start_date_str)
-        cache_key = f"{start_date_str}-{'2022-01-01'}-{key}"
-        # cached_value = cache.get_value(cache_key)
-        # if cached_value:
-            # candles_tuple = cached_value
-        # else:
-            # candles_tuple = cached_value or candles
-            # from_db = True    
-        # if from_db:
-        candles_tuple = candles
-        cache.set_value(cache_key, tuple(candles_tuple), expire_seconds=60 * 60 * 24 * 7)    
-        sync_publish('alert', {
-            'message': f'Successfully imported candles since -- until today -- days). ',
-            'type': 'success'
-        })
+        
     if running_via_dashboard:
         # at every second, we check to see if it's time to execute stuff
         status_checker = Timeloop()

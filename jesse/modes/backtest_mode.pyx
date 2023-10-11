@@ -160,7 +160,7 @@ def run(
         sync_publish('equity_curve', result['equity_curve'])
 
     # profiler.disable()
-    # pr_stats = pstats.Stats(profiler).sort_stats('tottime')
+    # pr_stats = pstats.Stats(profiler).sort_stats('ncalls')
     # pr_stats.print_stats(50)
     
     # close database connection
@@ -248,7 +248,6 @@ def load_candles(start_date_str: str, finish_date_str: str) -> Dict[str, Dict[st
             cached_value = np.array(cache.slice_pickles(cache_key, start_date_str, finish_date_str, key))
             # np.save('data.npy', cached_value, allow_pickle=True,fix_imports=True)
             # cached_value = np.load('data.npy')
-            
             
         else:
             cached_value = np.array(cache.get_value(cache_key))
@@ -839,7 +838,7 @@ def skip_simulator(candles: dict,
     cdef bint preload_candles = False
     cdef np.ndarray indicator1_f, indicator2_f, indicator3_f, indicator4_f, indicator5_f, \
     indicator6_f, indicator7_f, indicator8_f, indicator9_f,indicator10_f
-    cdef double[::1] current_temp_candle
+    cdef np.ndarray current_temp_candle
     begin_time_track = time.time()
     key = f"{config['app']['considering_candles'][0][0]}-{config['app']['considering_candles'][0][1]}"
     first_candles_set = candles[key]['candles']
@@ -964,7 +963,7 @@ def skip_simulator(candles: dict,
                                                                # current_temp_candle)
                                                                
             # in this new prices update there might be an order that needs to be executed
-            _simulate_price_change_effect_skip(current_temp_candle, exchange, symbol,preload_candles)
+            _simulate_price_change_effect(current_temp_candle, exchange, symbol,preload_candles)
 
             # generate and add candles for bigger timeframes
             if preload_candles == False:
@@ -1404,115 +1403,3 @@ def _finish_simulation(begin_time_track: float,
     return result
     
     
-def _simulate_price_change_effect_skip(double[::1] real_candle, exchange: str, symbol: str, bint precalc_candles = False) -> None:
-    # additional optimizations
-    cdef bint executed_order
-    cdef Py_ssize_t index
-    cdef float c_liquidation_price
-    # cdef str key 
-    cdef double[::1] current_temp_candle = real_candle
-    # cdef int p_lev
-    cdef list orders = store.orders.storage.get(f'{exchange}-{symbol}',[])
-    cdef Py_ssize_t len_orders = PyList_GET_SIZE(orders)
-    # current_temp_candle = real_candle.copy()
-    executed_order = False
-    key = f'{exchange}-{symbol}'
-    p = store.positions.storage.get(key, None)
-    while True:
-        if len_orders == 0:
-            executed_order = False
-        else:
-            # print(orders)
-            for index, order in enumerate(orders):
-                if index == len_orders - 1 and not order.status == order_statuses.ACTIVE:
-                    executed_order = False 
-                if not order.status == order_statuses.ACTIVE:
-                    continue
-                if (order.price >= current_temp_candle[4]) and (order.price <= current_temp_candle[3]): #candle_includes_price(current_temp_candle, order.price):
-                    try:
-                        storable_temp_candle, current_temp_candle = split_candle(current_temp_candle, order.price)
-                    except Exception as e: 
-                        print(e)
-                        print(f'{current_temp_candle} - {order.price}')
-                    if not precalc_candles:
-                        store.candles.add_one_candle(
-                            storable_temp_candle, exchange, symbol, '1m',
-                            with_execution=False,
-                            with_generation=False
-                        )
-                    # p = selectors.get_position(exchange, symbol)
-                    p.current_price = storable_temp_candle[2]
-                    executed_order = True
-                    order.execute()
-                    # break from the for loop, we'll try again inside the while
-                    # loop with the new current_temp_candle
-                    break
-                else:
-                    executed_order = False
-        if not executed_order:
-            # add/update the real_candle to the store so we can move on
-            if not precalc_candles:
-                store.candles.add_one_candle(
-                    real_candle, exchange, symbol, '1m',
-                    with_execution=False,
-                    with_generation=False
-                )
-            # p = selectors.get_position(exchange, symbol)
-            if p:
-                p.current_price = real_candle[2]
-            break
-    p: Position = store.positions.storage.get(key, None)
-    if not p:
-        return
-
-    # for now, we only support the isolated mode:
-    if p.exchange.type == 'spot' or p.exchange.futures_leverage_mode == 'cross':
-        return
-        
-    cdef double c_qty = p.qty
-    cdef str c_type
-    if c_qty == 0:
-        c_liquidation_price = NAN
-        c_type = 'close' 
-    else:
-        if p.exchange.type == 'spot':
-            p_lev = 1 
-        else:
-            p_lev = p.exchange.futures_leverage 
-
-        if c_qty > 0:   
-            c_type = 'long'
-            c_liquidation_price = p.entry_price * (1 - (1 / p_lev) + 0.004)
-            #p_lev = p.strategy.leverage
-        elif c_qty < 0:
-            c_type = 'short'
-            c_liquidation_price = p.entry_price * (1 + (1 / p_lev) - 0.004)
-        else:
-            c_liquidation_price = NAN
-            
-    if (c_liquidation_price >= real_candle[4]) and (c_liquidation_price <= real_candle[3]):
-    
-        closing_order_side = jh.closing_side(c_type)
-    
-        # create the market order that is used as the liquidation order
-        order = Order({
-            'id':  uuid.uuid4(),
-            'symbol': symbol,
-            'exchange': exchange,
-            'side': closing_order_side,
-            'type': order_types.MARKET,
-            'reduce_only': True,
-            'qty': jh.prepare_qty(p.qty, closing_order_side),
-            'price': p.bankruptcy_price
-        })
-
-        store.orders.add_order(order)
-
-        store.app.total_liquidations += 1
-
-        # logger.info(f'{p.symbol} liquidated at {p.liquidation_price}')
-
-        order.execute()
-            
-
-    # _check_for_liquidations(real_candle, exchange, symbol)

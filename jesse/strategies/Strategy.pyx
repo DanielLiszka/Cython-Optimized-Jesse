@@ -37,9 +37,16 @@ cdef extern from "Python.h":
         PyObject* PyList_GET_ITEM(object list, Py_ssize_t i)
         void PyList_SET_ITEM(object list, Py_ssize_t i, object o)
         list PyList_New(Py_ssize_t len)       
-
+        object PyObject_GetItem(object o, object key)
+        object PyObject_GetAttr(object o, object attr_name)
+        bint PyObject_RichCompareBool(object o1, object o2, int opid)
+        int PyList_Append(object list, object item)
+        object PyUnicode_RichCompare(object left, object right, int op)
+        
+        
 # @cython.boundscheck(False)
 # @cython.wraparound(False)
+# @cython.nonecheck(False)
 #cython: np_pythran=True
 
 cdef inline bint arr_equal(double [:,::1] a1, double [:,::1] a2) nogil noexcept:
@@ -684,7 +691,7 @@ class Strategy(ABC):
         #self._wait_until_executing_orders_are_fully_handled()
             
         # should cancel entry?
-        if PyList_GET_SIZE(self.entry_orders) > 0 and self.position.qty == 0  and self.should_cancel_entry():
+        if self.should_cancel_entry() and PyList_GET_SIZE(self.entry_orders) > 0 and self.position.qty == 0:
             self._execute_cancel()
 
         # update position
@@ -871,6 +878,7 @@ class Strategy(ABC):
         """
         Handles the execution permission for the strategy.
         """
+        cdef float sm_qty
         # make sure we don't execute this strategy more than once at the same time.
         if self._is_executing is True:
             return
@@ -878,7 +886,174 @@ class Strategy(ABC):
         self._is_executing = True
 
         self.before()
-        self._check()
+        
+        # self._check()
+        
+        """
+        Based on the newly updated info, check if we should take action or not
+        """
+        if not self._is_initiated:
+            self._is_initiated = True
+
+        #self._wait_until_executing_orders_are_fully_handled()
+            
+        # should cancel entry?
+        if self.should_cancel_entry() and PyList_GET_SIZE(self.entry_orders) > 0 and self.position.qty == 0:
+            self._execute_cancel()
+
+        # update position
+        if self.position.qty != 0:
+            # self._update_position()
+            self.update_position()
+            # self._detect_and_handle_entry_and_exit_modifications()
+            """ Detect and handle entry and exit modifications """
+            sm_qty = self.position.qty 
+            if sm_qty == 0:
+                return
+            try:
+                if sm_qty > 0 and self.buy is not None:
+                    # prepare format
+                    if type(self.buy) is not np.ndarray:
+                        self.buy = self._get_formatted_order(self.buy)
+
+                    # if entry has been modified
+                    if not arr_equal(self.buy,self._buy): #np.array_equal(self.buy, self._buy):
+                        self._buy = self.buy.copy()
+
+                        # cancel orders
+                        for o in self.entry_orders:
+                            if o.status == order_statuses.ACTIVE:
+                                self.broker.cancel_order(o.id)
+                        self._submit_buy_orders()
+
+                elif sm_qty < 0 and self.sell is not None:
+                    # prepare format
+                    if type(self.sell) is not np.ndarray:
+                        self.sell = self._get_formatted_order(self.sell)
+
+                    # if entry has been modified
+                    if not arr_equal(self.sell, self._sell): #np.array_equal(self.sell, self._sell):
+                        self._sell = self.sell.copy()
+
+                        # cancel orders
+                        for o in self.entry_orders:
+                            if o.status == order_statuses.ACTIVE:
+                                self.broker.cancel_order(o.id)
+                        self._submit_sell_orders()
+
+
+                if sm_qty != 0 and self.take_profit is not None:
+                    self._validate_take_profit()
+                    self._prepare_take_profit(False)
+
+                    # if _take_profit has been modified
+                    if not arr_equal(self.take_profit, self._take_profit): #np.array_equal(self.take_profit, self._take_profit):
+                        self._take_profit = self.take_profit.copy()
+
+                        # if there's only one order in self._stop_loss, then it could be a liquidation order, store its price
+                        if PyList_GET_SIZE(self._take_profit) == 1:
+                            temp_current_price = self.price
+                        else:
+                            temp_current_price = None
+
+                        # CANCEL previous orders
+                        for o in self.exit_orders:
+                            if o.is_take_profit and (o.status == order_statuses.ACTIVE):
+                                self.broker.cancel_order(o.id)
+                            elif o.is_executed:
+                                self._executed_close_orders.append(o)
+                        for o in self._take_profit:
+                            if self.position.qty == 0:
+                                break
+                            # see if we need to override the take-profit price to be the current price to ensure a MARKET order
+                            if temp_current_price == o[1]:
+                                order_price = self.price
+                            else:
+                                order_price = o[1]
+
+                            submitted_order: Order = self.broker.reduce_position_at(o[0], order_price, self.price)
+                            if submitted_order:
+                                submitted_order.submitted_via = order_submitted_via.TAKE_PROFIT
+
+                if sm_qty != 0 and self.stop_loss is not None:
+                    self._validate_stop_loss()
+                    self._prepare_stop_loss(False)
+
+                    # if stop_loss has been modified
+                    if not arr_equal(self.stop_loss, self._stop_loss): #np.array_equal(self.stop_loss, self._stop_loss):
+                        # prepare format
+                        self._stop_loss = self.stop_loss.copy()
+                        
+                        # if there's only one order in self._stop_loss, then it could be a liquidation order, store its price
+                        if PyList_GET_SIZE(self._stop_loss) == 1:
+                            temp_current_price = self.price
+                        else:
+                            temp_current_price = None
+                            
+                        # cancel orders
+                        for o in self.exit_orders:
+                            if o.is_stop_loss and (o.status == order_statuses.ACTIVE):
+                                self.broker.cancel_order(o.id)
+                        for o in self._stop_loss:
+                            if self.position.qty == 0:
+                                break
+                            # see if we need to override the stop-loss price to be the current price to ensure a MARKET order
+                            if temp_current_price == o[1]:
+                                order_price = self.price
+                            else:
+                                order_price = o[1]
+
+                            submitted_order: Order = self.broker.reduce_position_at(o[0], order_price, self.price)
+                            if submitted_order:
+                                submitted_order.submitted_via = order_submitted_via.STOP_LOSS
+            except TypeError and not "pytest" in sys.modules:
+                raise exceptions.InvalidStrategy(
+                    'Something odd is going on within your strategy causing a TypeError exception. '
+                    'Try running it with the debug mode enabled in a backtest to see what was going on near the end, and fix it.'
+                )
+            except:
+                raise
+
+            # validations: stop-loss and take-profit should not be the same
+            if (
+                    sm_qty != 0
+                    and (self.stop_loss is not None and self.take_profit is not None)
+                    and arr_equal(self.stop_loss, self.take_profit) #np.array_equal(self.stop_loss, self.take_profit)
+            ):
+                raise exceptions.InvalidStrategy(
+                    'stop-loss and take-profit should not be exactly the same. Just use either one of them and it will do.')
+
+        """ End detect and handle entry and exit modifications """
+            
+            
+        if config['app']['trading_mode'] == 'backtest' or "pytest" in sys.modules:
+            if PyList_GET_SIZE(store.orders.to_execute) > 0:
+                store.orders.execute_pending_market_orders()
+
+        # should_long and should_short
+        if self.position.qty == 0 and self.entry_orders == []:
+            self._reset()
+            should_short = self.should_short()
+            # validate that should_short is not True if the exchange_type is spot
+            if store.exchanges.storage.get(self.exchange, None).type == 'spot' and should_short is True:
+                raise exceptions.InvalidStrategy(
+                    'should_short cannot be True if the exchange type is "spot".'
+                )
+            should_long = self.should_long()
+            # should_short and should_long cannot be True at the same time
+            if should_short and should_long:
+                raise exceptions.ConflictingRules(
+                    'should_short and should_long should not be true at the same time.'
+                )
+            if should_long:
+                self._execute_long()
+            elif should_short:
+                self._execute_short()
+        """
+        End Check
+        """
+                
+                
         self.after()
         for m in self._cached_methods.values():
             m.cache_clear()
@@ -1286,19 +1461,18 @@ class Strategy(ABC):
         """
         cdef list entry_orders, all_orders
         cdef Py_ssize_t all_orders_len, i 
-        key = f'{self.exchange}-{self.symbol}'
+        cdef str key = f'{self.exchange}-{self.symbol}'
         all_orders = store.orders.storage.get(key, [])
         all_orders_len = PyList_GET_SIZE(all_orders)
         if all_orders_len == 0:
-            return []
+            return PyList_New(0)
         p = store.positions.storage.get(key, None)
         cdef double c_qty = p.qty 
         if c_qty == 0 : 
             entry_orders = all_orders.copy()
         else:
             # entry_orders = [o for o in all_orders if o.side == jh.type_to_side(p.type)]    
-            
-            entry_orders = []
+            entry_orders = PyList_New(0)
             if c_qty > 0: 
                 for i in range(all_orders_len):
                     if (all_orders[i].side == sides.BUY and not all_orders[i].status == order_statuses.CANCELED):
@@ -1309,6 +1483,7 @@ class Strategy(ABC):
                 for i in range(all_orders_len):
                     if (all_orders[i].side == sides.SELL and not all_orders[i].status == order_statuses.CANCELED):
                         entry_orders.append(all_orders[i])
+                        
                         
                 # entry_orders = [o for o in all_orders if (o.side == sides.SELL and not o.status == order_statuses.CANCELED)]
         

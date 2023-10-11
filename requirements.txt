@@ -31,3 +31,5 @@ aiofiles==22.1.0
 cython==3.0.3
 ruuid==0.3.0
 pythran==0.14.0
+polygon==0.7.0
+polygon-api-client==0.2.11

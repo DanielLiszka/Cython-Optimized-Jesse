@@ -1,20 +1,86 @@
-# from polygon.rest.client import RESTClient
-from requests import HTTPError
-# from .stock_data_importing import MyRESTClient
+from polygon.rest.client import RESTClient
 import jesse.helpers as jh
-from .interface import CandleExchange
-import datetime
-import pandas as pd 
-import numpy as np 
+from jesse.models import Candle
+from pandas import * 
+from datetime import date, datetime, timedelta
+from typing import Any, Optional
+import pandas as pd
+import requests
+from requests.adapters import HTTPAdapter 
+from urllib3.util.retry import Retry
+import time
+import os 
 
-class Polygon_Stocks(CandleExchange):
+class Polygon_Stocks(RESTClient):
+    def __init__(self, auth_key: str=['api_key'], timeout:int=5):
+        super().__init__(auth_key)
+        retry_strategy = Retry(total=15,
+                               backoff_factor=10,
+                               status_forcelist=[429, 500, 502, 503, 504])
+        adapter = HTTPAdapter(max_retries=retry_strategy)
+        self._session.mount('https://', adapter)
 
-    def __init__(self):
-        super().__init__('Polygon', 5000, 0.01, stock_mode=True,backup_exchange_class=None)
+    def get_tickers(self, market:str=None) -> list:
+        payload = {
+            'order': 'asc',
+            'limit': 1000,
+        }
+        resp = self.reference_tickers_v3(market=market,**payload)
+        if hasattr(resp, 'results'):
+            df = pd.DataFrame(resp.results)
+            
+            while hasattr(resp, 'next_url'):
+                resp = self.reference_tickers_v3(market=market,next_url=resp.next_url,**payload)
+                df = df.append(pd.DataFrame(resp.results))
+                
+            df = df['ticker'].values.tolist()
+            df1 = [x for x in df if str(x) != 'nan']
+            return df1
+        return None  
+
+    def get_bars(self, market:str=None, ticker:str=None, multiplier:int=1,
+                 timespan:str='minute', from_:date=None, to:date=None) -> None:
+
+        payload = {
+            'unadjusted': 'false',
+            'sort': 'asc',
+            'limit': 50000,
+        }
+
+        if ticker is None:
+            raise Exception('Ticker must not be None.')
+            
+        from_ = from_ if from_ else date(2000,1,1)
+        to = date.today()
+
+        resp = self.stocks_equities_aggregates(ticker, multiplier, timespan,
+                                      from_.strftime('%Y-%m-%d'), to.strftime('%Y-%m-%d'),
+                                      **payload)
+        df = pd.DataFrame(resp.results)
+        last_minute = 0
+        while resp.results[-1]['t'] > last_minute:
+            last_minute = resp.results[-1]['t']
+            last_minute_date = datetime.fromtimestamp(last_minute/1000).strftime('%Y-%m-%d')
+            resp = self.stocks_equities_aggregates(ticker, multiplier, timespan,
+                                      last_minute_date, to.strftime('%Y-%m-%d'),
+                                      **payload)
+            new_bars = pd.DataFrame(resp.results)
+            df = df.append(new_bars[new_bars['t'] > last_minute])
+        if not os.path.exists('storage/temp/stock bars'):
+            os.makedirs('storage/temp/stock bars')
+        try:
+            old_df = pd.read_csv(f'storage/temp/stock bars/{ticker}.csv')
+            old_df_lasttime = old_df['t'].iloc[-1]
+            old_df = old_df.append(df[df['t'] > old_df_lasttime])
+            df = old_df
+            df.to_csv(f'storage/temp/stock bars/{ticker}.csv', sep=',', index=False) 
+        except FileNotFoundError:
+            try: 
+                df.to_csv(f'storage/temp/stock bars/{ticker}.csv', sep=',', index=False) 
+            except:
+                raise Exception('Error occured while saving stock data')  
         
-    def init_backup_exchange(self):
-        self.backup_exchange = None
 
-    def get_starting_time(self, symbol):
-        return None
+
+
 
