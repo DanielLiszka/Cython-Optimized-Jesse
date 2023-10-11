@@ -64,6 +64,8 @@ def run(
             status_checker.start()
             base = jh.base_asset(symbol)
             formatedticker = f'{base}-USD'
+            if config['env']['API_Keys']['Polygon']['api_key'] == 'None':
+                raise Exception("Enter a Polygon.io API key to your jesse config file")
             client = Polygon_Stocks(auth_key = (config['env']['API_Keys']['Polygon']['api_key']))
             tickers = client.get_tickers(market='stocks')
             if str(base) not in tickers:

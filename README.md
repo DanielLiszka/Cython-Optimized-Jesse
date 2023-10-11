@@ -10,7 +10,7 @@ This is a maintained modified version of the Jesse backtesting framework. Create
 * Optional indicator precalculation w/o candle preloading
 * Monte Carlo Simulation
 * Significantly improved backtest simulation speed
-
+* Polygon.io stock data candle driver
 
 ## Removed Features
 
@@ -41,29 +41,29 @@ Iteration times for multiple timeframes were recorded for a backtest using the e
 ##### Optimized (Without Indicator Precalculation)
 
 ```bash
-3m : 16.08 seconds 
-5m : 9.91 seconds
-15m : 3.36 seconds
-30m : 1.79 seconds
-45m : 1.26 seconds
-1h : 0.99 seconds 
-2h : 0.58 seconds
-3h : 0.45 seconds
-4h : 0.38 seconds
+3m : 15.54 seconds 
+5m : 9.37 seconds
+15m : 3.28 seconds
+30m : 1.68 seconds
+45m : 1.18 seconds
+1h : 0.93 seconds 
+2h : 0.56 seconds
+3h : 0.43 seconds
+4h : 0.36 seconds
 ```
 
 ##### Optimized (With Indicator Precalculation and Preloaded Candles)
 
 ```bash
-3m : 4.28 seconds 
-5m : 2.59 seconds
-15m : 0.94 seconds 
-30m : 0.53 seconds
-45m : 0.40 seconds
-1h : 0.31 seconds
-2h : 0.22 seconds
-3h : 0.18 seconds
-4h : 0.17 seconds
+3m : 4.01 seconds 
+5m : 2.48 seconds
+15m : 0.87 seconds 
+30m : 0.48 seconds
+45m : 0.37 seconds
+1h : 0.29 seconds
+2h : 0.19 seconds
+3h : 0.16 seconds
+4h : 0.14 seconds
 ```
 
 ## Acknowledgements
