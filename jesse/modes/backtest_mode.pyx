@@ -116,7 +116,7 @@ def run(
     if candles is None:
         candles = load_candles(start_date, finish_date)
         for j in candles:
-            if candles[j]['exchange'] == ('Polygon_Stocks' or {'Polygon_Stocks'} or 'Polygon_Forex'):
+            if candles[j]['exchange'] in ['Polygon_Stocks','Polygon_Forex']:
                 config['env']['simulation']['preload_candles'] = False
                 config['env']['simulation']['precalculation'] = True
     if not jh.should_execute_silently():
@@ -178,7 +178,7 @@ def _generate_quantstats_report(candles_dict: dict, finish_date: str, start_date
         exchange, symbol = c[0], c[1]
         if exchange in config['app']['trading_exchanges'] and symbol in config['app']['trading_symbols']:
             # fetch from database
-            if exchange == ('Polygon_Stocks' or 'Polygon_Forex') :
+            if exchange == ['Polygon_Stocks','Polygon_Forex'] :
                 candles_tuple = stock_candles_func(symbol, start_date, finish_date,exchange)
             else:
                 candles = candles_dict[jh.key(exchange, symbol)]['candles']
@@ -259,7 +259,7 @@ def load_candles(start_date_str: str, finish_date_str: str) -> Dict[str, Dict[st
         # not cached, get and cache for later calls in the next 5 minutes
         # fetch from database
         else:
-            if exchange == ('Polygon_Stocks' or 'Polygon_Forex') :
+            if exchange in ['Polygon_Stocks','Polygon_Forex'] :
                 print('stock candles being made')
                 candles_tuple = stock_candles_func(symbol, start_date, finish_date,exchange)
             else: 
@@ -273,7 +273,7 @@ def load_candles(start_date_str: str, finish_date_str: str) -> Dict[str, Dict[st
                         Candle.timeframe == '1m' or Candle.timeframe.is_null(),
                         Candle.timestamp.between(start_date, finish_date)
                     ).order_by(Candle.timestamp.asc()).tuples()
-            from_db = True
+                from_db = True
         # validate that there are enough candles for selected period
         required_candles_count = (finish_date - start_date) / 60_000
         if len(candles_tuple) == 0 or candles_tuple[-1][0] != finish_date or candles_tuple[0][0] != start_date:
@@ -676,7 +676,7 @@ def indicator_precalculation(dict candles,double [:,::1] first_candles_set,strat
             if (timeframe == '1m' and skip_1m): # or (len(config['app']['considering_timeframes']) > 1 and timeframe == '1m'):
                 continue
             exchange = candles[j]['exchange']
-            if exchange == ('Polygon_Stocks' or {'Polygon_Stocks'} or 'Polygon_Forex'):
+            if exchange in ['Polygon_Stocks','Polygon_Forex']:
                 stock_prices = True
             if jh.get_config('env.simulation.preload_candles') and not stock_prices:
                 preload_candles = True   

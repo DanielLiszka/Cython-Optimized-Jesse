@@ -56,9 +56,9 @@ def get_candles(exchange: str, symbol: str, timeframe: str, start_date_: str, fi
         raise ValueError('Can\'t backtest the future!')
 
     # fetch from database
-    if exchange == ('Polygon_Stocks') :
+    if exchange in ['Polygon_Stocks','Polygon_Forex']:
         print('stock candles being made')
-        candles_tuple = stock_candles_func(symbol, start_date, finish_date)
+        candles_tuple = stock_candles_func(symbol, start_date, finish_date,exchange)
     else: 
         candles_tuple = Candle.select(
             Candle.timestamp, Candle.open, Candle.close, Candle.high, Candle.low,

@@ -46,12 +46,10 @@ def stock_candles_func(ticker, start_date, finish_date,exchange):
         ticker = ticker.split('-')[0]
         df = pd.read_csv(f'storage/temp/stock bars/{ticker}.csv')
     else:
-        print('test1')
         ticker = ticker.split('-')[0]
         #Example: AED-USD
         # ticker = f'C:{ticker}USD'
         df = pd.read_csv(f'storage/temp/forex bars/{ticker}.csv')
-        print('test2')
     df['date'] = pd.to_datetime(df['t'], unit='ms')
     df['date_index'] = df['date']
     df = df.set_index('date_index')

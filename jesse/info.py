@@ -154,7 +154,7 @@ exchange_info = {
     },
     exchanges_enums.POLYGON_STOCKS: {
     'name': exchanges_enums.POLYGON_STOCKS,
-    'url': 'https://polygon.com',
+    'url': 'https://polygon.io',
     'fee': 0.005,
     'type': 'spot',
     'supported_timeframes': BITFINEX_TIMEFRAMES, 
@@ -165,7 +165,7 @@ exchange_info = {
     },
     exchanges_enums.POLYGON_FOREX: {
     'name': exchanges_enums.POLYGON_FOREX,
-    'url': 'https://polygon.com',
+    'url': 'https://polygon.io',
     'fee': 0.005,
     'type': 'spot',
     'supported_timeframes': BITFINEX_TIMEFRAMES, 
