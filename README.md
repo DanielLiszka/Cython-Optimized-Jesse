@@ -8,7 +8,7 @@ This is a maintained modified version of the Jesse backtesting framework. Create
 * Optional indicator precalculation w/o candle preloading
 * Monte Carlo Simulation
 * Significantly improved backtest simulation speed
-* Polygon.io stock data candle driver
+* Polygon.io stock and forex candle importing driver
 
 ## Removed Features
 
