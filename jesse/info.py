@@ -163,6 +163,18 @@ exchange_info = {
         'live_trading': False,
         },
     },
+    exchanges_enums.POLYGON_FOREX: {
+    'name': exchanges_enums.POLYGON_FOREX,
+    'url': 'https://polygon.com',
+    'fee': 0.005,
+    'type': 'spot',
+    'supported_timeframes': BITFINEX_TIMEFRAMES, 
+    'modes': {
+        'backtesting': True,
+        'live_trading': False,
+        },
+    },
+    
     # DyDx
     exchanges_enums.DYDX_PERPETUAL: {
         'name': exchanges_enums.DYDX_PERPETUAL,

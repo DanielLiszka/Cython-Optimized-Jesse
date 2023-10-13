@@ -12,6 +12,9 @@ from jesse.modes.import_candles_mode.drivers.FTX.FTXPerpetualFutures import FTXP
 from jesse.modes.import_candles_mode.drivers.FTX.FTXSpot import FTXSpot
 from jesse.modes.import_candles_mode.drivers.FTX.FTXUSSpot import FTXUSSpot
 from jesse.modes.import_candles_mode.drivers.polygon_stocks import Polygon_Stocks
+from jesse.modes.import_candles_mode.drivers.polygon_forex import Polygon_Forex
+from jesse.modes.import_candles_mode.drivers.DyDx.DydxPerpetual import DydxPerpetual
+from jesse.modes.import_candles_mode.drivers.DyDx.DydxPerpetualTestnet import DydxPerpetualTestnet
 
 drivers = {
     # Perpetual Futures
@@ -23,12 +26,17 @@ drivers = {
     exchanges.BYBIT_USDT_PERPETUAL_TESTNET: BybitUSDTPerpetualTestnet,
     exchanges.FTX_PERPETUAL_FUTURES: FTXPerpetualFutures,
     exchanges.POLYGON_STOCKS: Polygon_Stocks,
+    exchanges.POLYGON_FOREX: Polygon_Forex,
 
     # Spot
     exchanges.FTX_SPOT: FTXSpot,
     exchanges.FTX_US_SPOT: FTXUSSpot,
     exchanges.BINANCE_SPOT: BinanceSpot,
-    exchanges.BINANCE_US_SPOT: BinanceUSSpot
+    exchanges.BINANCE_US_SPOT: BinanceUSSpot,
+    
+    # DEX
+    exchanges.DYDX_PERPETUAL: DydxPerpetual,
+    exchanges.DYDX_PERPETUAL_TESTNET: DydxPerpetualTestnet
 }
 
 driver_names = list(drivers.keys())

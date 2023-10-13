@@ -21,7 +21,9 @@ from jesse.services.cache import cache
 from jesse.store import store
 from jesse import exceptions
 from jesse.services.progressbar import Progressbar
+from jesse.services.numba_functions import stock_candles_func
 from jesse.modes.import_candles_mode.drivers.polygon_stocks import Polygon_Stocks
+from jesse.modes.import_candles_mode.drivers.polygon_forex import Polygon_Forex
 from jesse.config import config 
 
 def run(
@@ -48,58 +50,67 @@ def run(
     database.open_connection()
     
     if exchange in {'Polygon_Stocks','Polygon_Forex'}:
+        status_checker = Timeloop()
+        @status_checker.job(interval=timedelta(seconds=1))
+        def handle_time():
+            if process_status() != 'started':
+                raise exceptions.Termination
 
-        # if exchange == "Polygon_Forex":
-            
-        
-            
-        if exchange == "Polygon_Stocks":
-            status_checker = Timeloop()
-
-            @status_checker.job(interval=timedelta(seconds=1))
-            def handle_time():
-                if process_status() != 'started':
-                    raise exceptions.Termination
-
-            status_checker.start()
-            base = jh.base_asset(symbol)
-            formatedticker = f'{base}-USD'
-            if config['env']['API_Keys']['Polygon']['api_key'] == 'None':
-                raise Exception("Enter a Polygon.io API key to your jesse config file")
+        status_checker.start()
+        base = jh.base_asset(symbol)
+        formatedticker = f'{base}-USD'
+        progressbar = Progressbar(2)
+        if config['env']['API_Keys']['Polygon']['api_key'] == 'None':
+            raise Exception("Enter a Polygon.io API key to your jesse config file")
+        if exchange == 'Polygon_Stocks':
             client = Polygon_Stocks(auth_key = (config['env']['API_Keys']['Polygon']['api_key']))
             tickers = client.get_tickers(market='stocks')
-            if str(base) not in tickers:
-                raise Exception("Ticker Not Found")
-            start = start_date_str.split('-')
-            start = datetime(int(start[0]),int(start[1]),int(start[2]))
-            client.get_bars(market='stocks',ticker=base,from_=start,to=date.today())
-            
-            df = pd.read_csv(f'storage/temp/stock bars/{base}.csv', sep=',', skiprows=1, header=None)
-            data = df.to_numpy()
-            candles = []
-            for d in data:
-                candles.append({
-                    'id': jh.generate_unique_id(),
-                    'symbol': formatedticker,
-                    'exchange': 'Polygon_Stocks',
-                    'timestamp': int(d[0]),
-                    'open': float(d[1]) if d[1] == d[1] else np.nan,
-                    'close': float(d[2]) if d[2] == d[2] else np.nan,
-                    'high': float(d[3]) if d[3] == d[3] else np.nan,
-                    'low': float(d[4]) if d[4] == d[4] else np.nan,
-                    'volume': int(d[5]) if d[5] == d[5] else np.nan
-                })
-            key =  f'{exchange}-{symbol}'
-            yesterday = datetime.now() - timedelta(1)
-            yesterday = yesterday.strftime('%Y-%m-%d')
-            cache_key = f"{start_date_str}-{yesterday}-{key}"
-
-            candles_tuple = candles
-            cache.set_value(cache_key, tuple(candles_tuple), expire_seconds=60 * 60 * 24 * 7)    
-            sync_publish('alert', {
-                'message': f'Successfully imported candles since {start} until {yesterday} ). ',
-                'type': 'success'
+        if exchange == 'Polygon_Forex': 
+            client = Polygon_Forex(auth_key = (config['env']['API_Keys']['Polygon']['api_key']))
+            tickers = client.get_tickers(market='fx')
+        progressbar.update()
+        if running_via_dashboard:
+            sync_publish('progressbar', {
+                'current': progressbar.current,
+                'estimated_remaining_seconds': progressbar.estimated_remaining_seconds
             })
+        # if str(base) not in tickers:
+            # raise Exception("Ticker Not Found")
+        start = start_date_str.split('-')
+        start = datetime(int(start[0]),int(start[1]),int(start[2]))
+        if exchange == 'Polygon_Stocks':
+            client.get_bars(market='stocks',ticker=base,from_=start,to=date.today())
+        if exchange == 'Polygon_Forex':
+            client.get_bars(market='fx', ticker=base,from_=start,to=date.today())
+        progressbar.update()
+        # df = pd.read_csv(f'storage/temp/stock bars/{base}.csv', sep=',', skiprows=1, header=None)
+        # data = stock_candles_func(f'{ticker}"-USD"',start_date,finish_date)
+        
+        # data = df.to_numpy()
+        # candles = []
+        # for d in data:
+            # candles.append({
+                # 'id': jh.generate_unique_id(),
+                # 'symbol': formatedticker,
+                # 'exchange': 'Polygon_Stocks',
+                # 'timestamp': int(d[0]),
+                # 'open': float(d[1]) if d[1] == d[1] else np.nan,
+                # 'close': float(d[2]) if d[2] == d[2] else np.nan,
+                # 'high': float(d[3]) if d[3] == d[3] else np.nan,
+                # 'low': float(d[4]) if d[4] == d[4] else np.nan,
+                # 'volume': int(d[5]) if d[5] == d[5] else np.nan
+            # })
+        # key =  f'{exchange}-{symbol}'
+        # yesterday = datetime.now() - timedelta(1)
+        # yesterday = yesterday.strftime('%Y-%m-%d')
+        # cache_key = f"{start_date_str}-{yesterday}-{key}"
+
+        # candles_tuple = candles
+        # cache.set_value(cache_key, tuple(candles_tuple), expire_seconds=60 * 60 * 24 * 7)    
+        sync_publish('alert', {
+            'message': f'Successfully imported candles since {start} until {date.today()} ). ',
+            'type': 'success'
+        })
         
     if running_via_dashboard:
         # at every second, we check to see if it's time to execute stuff

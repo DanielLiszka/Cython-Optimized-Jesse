@@ -93,10 +93,8 @@ def run(
     # cdef float price_pct_change, bh_daily_returns_all_routes
     from jesse.config import config, set_config
     config['app']['trading_mode'] = 'backtest'
-
     # debug flag
     config['app']['debug_mode'] = debug_mode
-
     # inject config
     if not jh.is_unit_testing():
         set_config(user_config) 
@@ -117,7 +115,10 @@ def run(
     # load historical candles
     if candles is None:
         candles = load_candles(start_date, finish_date)
-        
+        for j in candles:
+            if candles[j]['exchange'] == ('Polygon_Stocks' or {'Polygon_Stocks'} or 'Polygon_Forex'):
+                config['env']['simulation']['preload_candles'] = False
+                config['env']['simulation']['precalculation'] = True
     if not jh.should_execute_silently():
         sync_publish('general_info', {
             'session_id': jh.get_session_id(),
@@ -177,8 +178,8 @@ def _generate_quantstats_report(candles_dict: dict, finish_date: str, start_date
         exchange, symbol = c[0], c[1]
         if exchange in config['app']['trading_exchanges'] and symbol in config['app']['trading_symbols']:
             # fetch from database
-            if exchange == ('Polygon_Stocks') :
-                candles_tuple = stock_candles_func(symbol, start_date, finish_date)
+            if exchange == ('Polygon_Stocks' or 'Polygon_Forex') :
+                candles_tuple = stock_candles_func(symbol, start_date, finish_date,exchange)
             else:
                 candles = candles_dict[jh.key(exchange, symbol)]['candles']
 
@@ -258,9 +259,9 @@ def load_candles(start_date_str: str, finish_date_str: str) -> Dict[str, Dict[st
         # not cached, get and cache for later calls in the next 5 minutes
         # fetch from database
         else:
-            if exchange == ('Polygon_Stocks') :
+            if exchange == ('Polygon_Stocks' or 'Polygon_Forex') :
                 print('stock candles being made')
-                candles_tuple = stock_candles_func(symbol, start_date, finish_date)
+                candles_tuple = stock_candles_func(symbol, start_date, finish_date,exchange)
             else: 
                 print('candles being made')
                 candles_tuple = Candle.select(
@@ -648,18 +649,18 @@ def trim_zeros(arr):
     
 def indicator_precalculation(dict candles,double [:,::1] first_candles_set,strategy, bint skip_1m = False):
     cdef Py_ssize_t  i, consider_timeframes, candle_prestorage_shape, index, offset, length,rows, index2, candle_count
-    cdef np.ndarray candle_prestorage, partial_array, gen_candles, partial_date_array, modified_partial_array, \
+    cdef np.ndarray candle_prestorage, partial_array, partial_date_array, modified_partial_array, \
     indicator1, indicator2, indicator3, indicator4, indicator5, \
     indicator6, indicator7, indicator8, indicator9,indicator10 
+    cdef tuple gen_candles
     # cdef double [:,::1] new_array, date_index
-    cdef double [:,::1] new_candles, new_array, date_index
+    # cdef np.ndarray new_array
+    cdef double [:,::1] new_candles, date_index, new_array
     cdef double [::1] indicator1_array, indicator2_array, indicator3_array, indicator4_array,indicator5_array,indicator6_array, \
     indicator7_array,indicator8_array,indicator9_array,indicator10_array
     
     cdef bint stock_prices = False
     cdef bint preload_candles = False
-    if jh.get_config('env.simulation.preload_candles'):
-        preload_candles = True   
     indicator1_storage = {}
     indicator2_storage = {}
     indicator3_storage = {}
@@ -674,10 +675,12 @@ def indicator_precalculation(dict candles,double [:,::1] first_candles_set,strat
         for timeframe in config['app']['considering_timeframes']:
             if (timeframe == '1m' and skip_1m): # or (len(config['app']['considering_timeframes']) > 1 and timeframe == '1m'):
                 continue
-
             exchange = candles[j]['exchange']
-            if exchange == ('Polygon_Stocks' or {'Polygon_Stocks'}):
+            if exchange == ('Polygon_Stocks' or {'Polygon_Stocks'} or 'Polygon_Forex'):
                 stock_prices = True
+            if jh.get_config('env.simulation.preload_candles') and not stock_prices:
+                preload_candles = True   
+            # pd.DataFrame(candles[j]['candles']).to_csv('framework_candles.csv')
             symbol = candles[j]['symbol']
             new_candles = candles[j]['candles']
             key = f'{exchange}-{symbol}-{timeframe}'
@@ -694,7 +697,12 @@ def indicator_precalculation(dict candles,double [:,::1] first_candles_set,strat
             index2 = 0
             candle_count = 0
             date_index = np.zeros([partial_array.shape[0],2]) 
+            # test1 = pd.DataFrame(new_array)
+            # test1.to_csv('test1.csv')
             if stock_prices:
+
+                # confg['env']['simulation']['preload_candles'] = False
+
                 for i in range(0,length):
                     if ((i + 1) % consider_timeframes == 0):
                         gen_candles = generate_candles_from_minutes(new_array[(i - (consider_timeframes-1)):(i+1)])
@@ -717,7 +725,7 @@ def indicator_precalculation(dict candles,double [:,::1] first_candles_set,strat
             # print(f'Candle Index : {index}') 
             # print(f'Indicator Index : {index2}')
             
-            # pd.DataFrame(new_array).to_csv('new_array.csv')
+            # pd.DataFrame(partial_array).to_csv('stocks_partial_array.csv')
             # print(date_index)
             indicator1 = strategy._indicator1(precalc_candles = partial_array)
             indicator2 = strategy._indicator2(precalc_candles = partial_array)
@@ -736,16 +744,26 @@ def indicator_precalculation(dict candles,double [:,::1] first_candles_set,strat
                     if i > candle_count:
                         i = candle_count
                     if date_index[i][1] != date_index[i-1][1]:   
-                        indicator1 = np.insert(indicator1, i, indicator1[i-1])
-                        indicator2 = np.insert(indicator2, i, indicator2[i-1]) 
-                        indicator3 = np.insert(indicator3, i, indicator3[i-1]) 
-                        indicator4 = np.insert(indicator4, i, indicator4[i-1]) 
-                        indicator5 = np.insert(indicator5, i, indicator5[i-1]) 
-                        indicator6 = np.insert(indicator6, i, indicator6[i-1]) 
-                        indicator7 = np.insert(indicator7, i, indicator7[i-1]) 
-                        # indicator8 = np.insert(indicator8, i, indicator8[i-1]) 
-                        # indicator9 = np.insert(indicator9, i, indicator9[i-1]) 
-                        # indicator10 = np.insert(indicator10, i, indicator10[i-1]) 
+                        if indicator1 is not None:
+                            indicator1 = np.insert(indicator1, i, indicator1[i-1])
+                        if indicator2 is not None:
+                            indicator2 = np.insert(indicator2, i, indicator2[i-1]) 
+                        if indicator3 is not None:
+                            indicator3 = np.insert(indicator3, i, indicator3[i-1]) 
+                        if indicator4 is not None:
+                            indicator4 = np.insert(indicator4, i, indicator4[i-1]) 
+                        if indicator5 is not None:
+                            indicator5 = np.insert(indicator5, i, indicator5[i-1]) 
+                        if indicator6 is not None:
+                            indicator6 = np.insert(indicator6, i, indicator6[i-1]) 
+                        if indicator7 is not None:
+                            indicator7 = np.insert(indicator7, i, indicator7[i-1]) 
+                        if indicator8 is not None:
+                            indicator8 = np.insert(indicator8, i, indicator8[i-1]) 
+                        if indicator9 is not None:
+                            indicator9 = np.insert(indicator9, i, indicator9[i-1]) 
+                        if indicator10 is not None:
+                            indicator10 = np.insert(indicator10, i, indicator10[i-1]) 
                         
                             
             if indicator1 is not None:

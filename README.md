@@ -1,12 +1,10 @@
-This is a maintained modified version of the Jesse backtesting framework. Created with the intention of maximizing backtesting speed and introducing support for stock and forex backtesting/optimization. Currently, it is still **under development**. 
+This is a maintained modified version of the Jesse backtesting framework. Created with the intention of maximizing backtesting speed and introducing support for stock and forex backtesting/optimization. 
 
-## Planned New Features
-
-* Forex backtesting/optimization 
 
 ## New Features
 
 * Stock backtesting/optimization 
+* Forex backtesting/optimization
 * Optional indicator precalculation w/o candle preloading
 * Monte Carlo Simulation
 * Significantly improved backtest simulation speed

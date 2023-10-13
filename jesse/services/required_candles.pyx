@@ -48,8 +48,8 @@ def load_required_candles(exchange: str, symbol: str, start_date_str: str, finis
     # not cached, get and cache for later calls in the next 5 minutes
     else:
         # fetch from database
-        if exchange == ('Polygon_Stocks') :
-            candles_tuple = stock_candles_func(symbol, pre_start_date, pre_finish_date)
+        if exchange == ('Polygon_Stocks' or 'Polygon_Forex') :
+            candles_tuple = stock_candles_func(symbol, pre_start_date, pre_finish_date,exchange)
         else:
             candles_tuple = tuple(
                 Candle.select(
@@ -64,7 +64,8 @@ def load_required_candles(exchange: str, symbol: str, start_date_str: str, finis
             )
 
         # cache it for near future calls
-        cache.set_value(cache_key, candles_tuple, expire_seconds=60 * 60 * 24 * 7)
+        if exchange != ('Polygon_Stocks' or 'Polygon_Forex') :
+            cache.set_value(cache_key, candles_tuple, expire_seconds=60 * 60 * 24 * 7)
 
     candles = np.array(candles_tuple)
     if len(candles) < short_candles_count + 1:
