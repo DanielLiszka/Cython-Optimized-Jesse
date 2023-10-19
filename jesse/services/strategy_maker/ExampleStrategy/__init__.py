@@ -2,6 +2,8 @@ from jesse.strategies import Strategy, cached
 import jesse.indicators as ta
 from jesse import utils
 
+# if indicators are precalcualted then the most recent values are found in "self._indicator1_value".
+# The ability to precalcualte indicators and pregenerate candles is toggled in the config file
 
 class ExampleStrategy(Strategy):
 

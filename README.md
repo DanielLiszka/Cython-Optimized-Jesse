@@ -1,5 +1,6 @@
-This is a maintained modified version of the Jesse backtesting framework. Created with the intention of maximizing backtesting speed and introducing support for stock and forex backtesting/optimization. 
+This is a maintained modified version of the Jesse backtesting framework. Created with the intention of maximizing backtesting speed and introducing support for stock and forex backtesting/optimization.
 
+ Built-in methods were added for pregenerating candles and precalculating indicators to improve speed wihtout affecting accuracy. If the indicators are precalculated then the last candle close is used for higher timeframe indicator calculations rather than the current partially formed candle. It's possible to backtest stocks, forex, and cryptocurrency concurrently if the indicators are precalculated and the candles are not pregenerated. 
 
 ## New Features
 

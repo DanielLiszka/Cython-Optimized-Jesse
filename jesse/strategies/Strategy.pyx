@@ -102,6 +102,19 @@ class Strategy(ABC):
         self._executed_open_orders:list = []
         self._executed_close_orders:list = []
         
+        self._current_candle:np.ndarray = None
+        self._indicator1_value_tf = None
+        self._indicator2_value_tf = None
+        self._indicator3_value_tf = None
+        self._indicator4_value_tf = None
+        self._indicator5_value_tf = None
+        self._indicator6_value_tf = None
+        self._indicator7_value_tf = None
+        self._indicator8_value_tf = None
+        self._indicator9_value_tf = None
+        self._indicator10_value_tf = None
+        self.other_tf: str = None
+       
         self._indicator1_value = None
         self._indicator2_value = None 
         self._indicator3_value = None
@@ -112,6 +125,7 @@ class Strategy(ABC):
         self._indicator8_value = None
         self._indicator9_value = None
         self._indicator10_value = None 
+        
         
         self.trade: ClosedTrade = None
         self.trades_count: int = 0
