@@ -62,6 +62,13 @@ cdef inline bint arr_equal(double [:,::1] a1, double [:,::1] a2) nogil noexcept:
                 break 
     return True
     
+cdef inline bint cython_min_iterable(double[::1] a1) nogil noexcept:
+    cdef Py_ssize_t len1 = a1.shape[0]
+    for i in range(len1):
+        if a1[i] <= 0:
+            return True
+    return False
+    
 # def arr_equal(np.ndarray a1, np.ndarray a2):
     # return np.array_equal(a1,a2)
 # def uuid4():
@@ -1302,7 +1309,7 @@ class Strategy(ABC):
         arr = np.array(var, dtype=float)
 
         # validate that the price (second column) is not less or equal to zero
-        if arr[:, 1].min() <= 0:
+        if arr[:, 1].min() <= 0:  #cython_min_iterable(var[:,1])
             raise exceptions.InvalidStrategy(f'Order price must be greater than zero: \n{var}')
 
         return arr
