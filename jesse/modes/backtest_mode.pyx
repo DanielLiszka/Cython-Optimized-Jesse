@@ -40,10 +40,11 @@ from jesse.routes import router
 from jesse.services import charts
 from jesse.services import quantstats
 from jesse.services import report
+from jesse.services.backtesting_chart import generateReport 
 from jesse.services.cache import cache
 from jesse.services.candle import print_candle, candle_includes_price, split_candle
 from jesse.services.candle import generate_candle_from_one_minutes
-from jesse.services.numba_functions import monte_carlo_candles, stock_candles_func
+from jesse.services.numba_functions import monte_carlo_simulation, stock_candles_func
 from jesse.services.file import store_logs
 from jesse.services.validators import validate_routes
 from jesse.store import store
@@ -86,9 +87,9 @@ def run(
                 raise exceptions.Termination
         status_checker.start()
 
-    # import cProfile, pstats 
-    # profiler = cProfile.Profile()
-    # profiler.enable()    
+    import cProfile, pstats 
+    profiler = cProfile.Profile()
+    profiler.enable()    
    
     cdef list change,data
     cdef int routes_count, index
@@ -162,9 +163,9 @@ def run(
         sync_publish('metrics', result['metrics'])
         sync_publish('equity_curve', result['equity_curve'])
 
-    # profiler.disable()
-    # pr_stats = pstats.Stats(profiler).sort_stats('tottime')
-    # pr_stats.print_stats(50)
+    profiler.disable()
+    pr_stats = pstats.Stats(profiler).sort_stats('tottime')
+    pr_stats.print_stats(50)
     
     # close database connection
     from jesse.services.db import database
@@ -324,7 +325,6 @@ def iterative_simulator(
     result = {}
     cdef Py_ssize_t length, count
     cdef bint precalc_bool,indicator1_bool,indicator2_bool,indicator3_bool,indicator4_bool,indicator5_bool,indicator6_bool,indicator7_bool,indicator8_bool,indicator9_bool,indicator10_bool
-    cdef np.ndarray indicator1_f, indicator2_f, indicator3_f, indicator4_f, indicator5_f, indicator6_f, indicator7_f, indicator8_f, indicator9_f,indicator10_f
     cdef dict indicator1_storage, indicator2_storage, indicator3_storage, indicator4_storage, indicator5_storage, indicator6_storage, indicator7_storage, indicator8_storage, indicator9_storage, indicator10_storage
     cdef int offset = 0
     cdef int total, f_offset
@@ -341,14 +341,9 @@ def iterative_simulator(
     store.app.time = first_candles_set[0][0]
 
     if jh.get_config('env.simulation.Montecarlo'):
+        deviation = jh.get_config('env.MonteCarlo.deviation_factor')
         for j in candles:
-
-            # candles[j]['candles'][:, 1], candles[j]['candles'][:, 2], candles[j]['candles'][:, 3], candles[j]['candles'][:, 4] = monte_carlo_candles(candles[j]['candles'][:])
-            candles[j]['candles'][:, 1] = monte_carlo_candles(candles[j]['candles'][:, 1])
-            candles[j]['candles'][:, 2] = monte_carlo_candles(candles[j]['candles'][:, 2])
-            candles[j]['candles'][:, 3] = monte_carlo_candles(candles[j]['candles'][:, 3])
-            candles[j]['candles'][:, 4] = monte_carlo_candles(candles[j]['candles'][:, 4])
-            # candles[j]['candles'][:, 5] = monte_carlo_candles(candles[j]['candles'][:, 5])
+            candles[j]['candles'] = monte_carlo_simulation(candles[j]['candles'],deviation)
 
     for r in router.routes:
         # if the r.strategy is str read it from file
@@ -414,16 +409,6 @@ def iterative_simulator(
     }
     
     progressbar = Progressbar(length, step=60)
-    indicator1_f = None
-    indicator2_f = None
-    indicator3_f = None
-    indicator4_f = None
-    indicator5_f = None
-    indicator6_f = None
-    indicator7_f = None
-    indicator8_f = None
-    indicator9_f = None
-    indicator10_f = None 
     
     if jh.get_config('env.simulation.precalculation'):
         indicator1_storage,indicator2_storage,indicator3_storage,indicator4_storage,indicator5_storage,indicator6_storage,indicator7_storage,indicator8_storage,indicator9_storage,indicator10_storage,other_tf = indicator_precalculation(candles,first_candles_set,store.positions.storage.get(key,None).strategy, False, False,None)
@@ -750,16 +735,18 @@ def indicator_precalculation(dict candles,double [:,::1] first_candles_set,strat
 
             # pd.DataFrame(partial_array).to_csv('stocks_partial_array.csv')
             # print(date_index)
-            indicator1 = strategy._indicator1(precalc_candles = partial_array)
-            indicator2 = strategy._indicator2(precalc_candles = partial_array)
-            indicator3 = strategy._indicator3(precalc_candles = partial_array)
-            indicator4 = strategy._indicator4(precalc_candles = partial_array)
-            indicator5 = strategy._indicator5(precalc_candles = partial_array)
-            indicator6 = strategy._indicator6(precalc_candles = partial_array)
-            indicator7 = strategy._indicator7(precalc_candles = partial_array)
-            indicator8 = strategy._indicator8(precalc_candles = partial_array)
-            indicator9 = strategy._indicator9(precalc_candles = partial_array)
-            indicator10 = strategy._indicator10(precalc_candles = partial_array)
+            
+            #To Do: add sequential parameter here:
+            indicator1 = strategy._indicator1(precalc_candles = partial_array,sequential=True)
+            indicator2 = strategy._indicator2(precalc_candles = partial_array,sequential=True)
+            indicator3 = strategy._indicator3(precalc_candles = partial_array,sequential=True)
+            indicator4 = strategy._indicator4(precalc_candles = partial_array,sequential=True)
+            indicator5 = strategy._indicator5(precalc_candles = partial_array,sequential=True)
+            indicator6 = strategy._indicator6(precalc_candles = partial_array,sequential=True)
+            indicator7 = strategy._indicator7(precalc_candles = partial_array,sequential=True)
+            indicator8 = strategy._indicator8(precalc_candles = partial_array,sequential=True)
+            indicator9 = strategy._indicator9(precalc_candles = partial_array,sequential=True)
+            indicator10 = strategy._indicator10(precalc_candles = partial_array,sequential=True)
             
             if stock_prices:
                 # np.pad(date_index, (0, 3000), 'constant')
@@ -788,61 +775,60 @@ def indicator_precalculation(dict candles,double [:,::1] first_candles_set,strat
                         if indicator10 is not None:
                             indicator10 = np.insert(indicator10, i, indicator10[i-1]) 
                         
-                            
             if indicator1 is not None:
                 indicator1 = np.delete(indicator1,slice(0,(candle_prestorage_shape/consider_timeframes)-1))
-                indicator1_storage[key] = indicator1
+                indicator1_storage[key] = list(indicator1)
             else:
                 indicator1_storage = None
             if indicator2 is not None:
                 indicator2 = np.delete(indicator2,slice(0,(candle_prestorage_shape/consider_timeframes)-1))
-                indicator2_storage[key] = indicator2  
+                indicator2_storage[key] = list(indicator2)
             else:
                 indicator2_storage = None
             if indicator3 is not None:
                 indicator3 = np.delete(indicator3,slice(0,(candle_prestorage_shape/consider_timeframes)-1))
-                indicator3_storage[key] =  indicator3
+                indicator3_storage[key] =  list(indicator3)
             else:
                 indicator3_storage = None
             if indicator4 is not None:
                 indicator4 = np.delete(indicator4,slice(0,(candle_prestorage_shape/consider_timeframes)-1))
-                indicator4_storage[key] = indicator4
+                indicator4_storage[key] = list(indicator4)
             else:
                 indicator4_storage = None
             if indicator5  is not None:
                 indicator5 = np.delete(indicator5,slice(0,(candle_prestorage_shape/consider_timeframes)-1))
-                indicator5_storage[key] = indicator5
+                indicator5_storage[key] = list(indicator5)
             else:
                 indicator5_storage = None
             if indicator6  is not None:
                 indicator6 = np.delete(indicator6,slice(0,(candle_prestorage_shape/consider_timeframes)-1))
-                indicator6_storage[key] = indicator6 
+                indicator6_storage[key] = list(indicator6)
             else:
                 indicator6_storage = None
             if indicator7 is not None:
                 indicator7 = np.delete(indicator7,slice(0,(candle_prestorage_shape/consider_timeframes)-1))
-                indicator7_storage[key] = indicator7            
+                indicator7_storage[key] = list(indicator7)            
             else:
                 indicator7_storage = None
             if indicator8 is not None:
                 indicator8 = np.delete(indicator8,slice(0,(candle_prestorage_shape/consider_timeframes)-1))
-                indicator8_storage[key] = indicator8 
+                indicator8_storage[key] = list(indicator8) 
             else:
                 indicator8_storage = None
             if indicator9 is not None:
                 indicator9 = np.delete(indicator9,slice(0,(candle_prestorage_shape/consider_timeframes)-1))
-                indicator9_storage[key] = indicator9 
+                indicator9_storage[key] = list(indicator9) 
             else:
                 indicator9_storage = None
             if indicator10 is not None:
                 indicator10 = np.delete(indicator10,slice(0,(candle_prestorage_shape/consider_timeframes)-1))
-                indicator10_storage[key] = indicator10 
+                indicator10_storage[key] = list(indicator10) 
             else:
                 indicator10_storage = None
                 
             if preload_candles and skip_1m and not stock_prices:
                 store.candles.storage[key].array = partial_array
-                partial_array = np.delete(partial_array,slice(0,candle_prestorage_shape/consider_timeframes),axis=0)
+                # partial_array = np.delete(partial_array,slice(0,candle_prestorage_shape/consider_timeframes),axis=0)
                 # strategy.slice_amount[key] = (candle_prestorage_shape/consider_timeframes)+1
             
             for r in router.routes:
@@ -873,6 +859,7 @@ def skip_simulator(candles: dict,
         generate_json: bool = False,
         generate_equity_curve: bool = False,
         generate_hyperparameters: bool = False,
+        generate_backtesting_chart: bool = False,
         start_date: str = None,
         finish_date: str = None,
         full_path_name: str= None,
@@ -887,12 +874,17 @@ def skip_simulator(candles: dict,
     cdef str _key
     cdef bint preload_candles = False
     cdef bint other_tf
-    cdef np.ndarray indicator1_f, indicator2_f, indicator3_f, indicator4_f, indicator5_f, \
-    indicator6_f, indicator7_f, indicator8_f, indicator9_f,indicator10_f
-    cdef double[:,::1] _get_candles
+    cdef double[:,::1] _get_candles, _first_candles_set
     cdef double[::1] current_temp_candle
     cdef np.ndarray current_temp_candle_
     begin_time_track = time.time()
+    
+    if jh.get_config('env.simulation.Montecarlo'):
+        deviation = jh.get_config('env.MonteCarlo.deviation_factor')
+        for j in candles:
+            candles[j]['candles'] = monte_carlo_simulation(candles[j]['candles'],deviation)
+    
+    
     key = f"{config['app']['considering_candles'][0][0]}-{config['app']['considering_candles'][0][1]}"
     first_candles_set = candles[key]['candles']
     length = len(first_candles_set)
@@ -933,16 +925,6 @@ def skip_simulator(candles: dict,
     }
     inv_dic = {v: k for k, v in dic.items()}
     
-    indicator1_f = None
-    indicator2_f = None
-    indicator3_f = None
-    indicator4_f = None
-    indicator5_f = None
-    indicator6_f = None
-    indicator7_f = None
-    indicator8_f = None
-    indicator9_f = None
-    indicator10_f = None 
     if jh.get_config('env.simulation.preload_candles') and jh.get_config('env.simulation.precalculation'):
         if skip > 1:
             preload_candles = True
@@ -974,11 +956,57 @@ def skip_simulator(candles: dict,
     else:
         precalc_bool = False
 
+    if generate_backtesting_chart: 
+        indicators = []
+        if precalc_bool:
+            if indicator1_bool:
+                indicators.append(indicator1_storage)
+            if indicator2_bool:
+                indicators.append(indicator2_storage)
+            if indicator3_bool:
+                indicators.append(indicator3_storage)
+            if indicator4_bool:
+                indicators.append(indicator4_storage)
+            if indicator5_bool:
+                indicators.append(indicator5_storage)
+            if indicator6_bool:
+                indicators.append(indicator6_storage)
+            if indicator7_bool:
+                indicators.append(indicator7_storage)
+            if indicator8_bool:
+                indicators.append(indicator8_storage)
+            if indicator9_bool:
+                indicators.append(indicator9_storage)
+            if indicator10_bool:
+                indicators.append(indicator10_storage)
+        else:
+            _candles = strategy.candles
+            if strategy._indicator1 is not None:
+                indicators.append(strategy._indicator1(_candles,True))
+            if strategy._indicator2 is not None:
+                indicators.append(strategy._indicator2(_candles,True))
+            if strategy._indicator3 is not None:
+                indicators.append(strategy._indicator3(_candles, True))
+            if strategy._indicator4 is not None:
+                indicators.append(strategy._indicator4(_candles, True))
+            if strategy._indicator5 is not None:
+                indicators.append(strategy._indicator5(_candles, True))
+            if strategy._indicator6 is not None:
+                indicators.append(strategy._indicator6(_candles, True))
+            if strategy._indicator7 is not None:
+                indicators.append(strategy._indicator7(_candles, True))
+            if strategy._indicator8 is not None:
+                indicators.append(strategy._indicator8(_candles, True))
+            if strategy._indicator9 is not None:
+                indicators.append(strategy._indicator9(_candles, True))
+            if strategy._indicator10 is not None:
+                indicators.append(strategy._indicator10(_candles, True))
 
-        
+
+    _first_candles_set = first_candles_set
     while i <= length:
         # update time = open new candle, use i-1  because  0 < i <= length
-        store.app.time = first_candles_set[i - 1][0] + 60_000
+        store.app.time = _first_candles_set[i - 1][0] + 60_000
 
         # add candles
         for j in candles:
@@ -1055,6 +1083,7 @@ def skip_simulator(candles: dict,
         for r in router.routes:
             count = dic[r.timeframe]
             # print(f'{r.exchange} - {r.symbol} - {r.timeframe}')
+
             if i % count == 0:
                 #Give Current candle(s)
                 if preload_candles:
@@ -1066,55 +1095,56 @@ def skip_simulator(candles: dict,
                     if indicator1_bool:
                         r.strategy._indicator1_value = indicator1_storage[indicator_key][total-f_offset:total+1]
                         if other_tf:
+                            other_tf_str = f'{r.exchange}-{r.symbol}-{r.strategy.other_tf}'
                             other_count = dic[r.strategy.other_tf]
                             if i % other_count == 0:
                                 other_total = (i/other_count)
-                                r.strategy._indicator1_value_tf = indicator1_storage[f'{r.exchange}-{r.symbol}-{r.strategy.other_tf}'][other_total-f_offset:other_total+1]
+                                r.strategy._indicator1_value_tf = indicator1_storage[other_tf_str][other_total-f_offset:other_total+1]
                     if indicator2_bool:
                         r.strategy._indicator2_value = indicator2_storage[indicator_key][total-f_offset:total+1]
                         if other_tf:
                             if i % other_count == 0:
-                                r.strategy._indicator2_value_tf = indicator2_storage[f'{r.exchange}-{r.symbol}-{r.strategy.other_tf}'][other_total-f_offset:other_total+1]
+                                r.strategy._indicator2_value_tf = indicator2_storage[other_tf_str][other_total-f_offset:other_total+1]
                     if indicator3_bool:
                         r.strategy._indicator3_value = indicator3_storage[indicator_key][total-f_offset:total+1]
                         if other_tf:
                             if i % other_count == 0:
-                                r.strategy._indicator3_value_tf = indicator3_storage[f'{r.exchange}-{r.symbol}-{r.strategy.other_tf}'][other_total-f_offset:other_total+1]
+                                r.strategy._indicator3_value_tf = indicator3_storage[other_tf_str][other_total-f_offset:other_total+1]
                     if indicator4_bool:
                         r.strategy._indicator4_value = indicator4_storage[indicator_key][total-f_offset:total+1]
                         if other_tf:
                             if i % other_count == 0:
-                                r.strategy._indicator4_value_tf = indicator4_storage[f'{r.exchange}-{r.symbol}-{r.strategy.other_tf}'][other_total-f_offset:other_total+1]
+                                r.strategy._indicator4_value_tf = indicator4_storage[other_tf_str][other_total-f_offset:other_total+1]
                     if indicator5_bool:
                         r.strategy._indicator5_value = indicator5_storage[indicator_key][total-f_offset:total+1]
                         if other_tf:
                             if i % other_count == 0:
-                                r.strategy._indicator5_value_tf = indicator5_storage[f'{r.exchange}-{r.symbol}-{r.strategy.other_tf}'][other_total-f_offset:other_total+1]
+                                r.strategy._indicator5_value_tf = indicator5_storage[other_tf_str][other_total-f_offset:other_total+1]
                     if indicator6_bool:
                         r.strategy._indicator6_value = indicator6_storage[indicator_key][total-f_offset:total+1]
                         if other_tf:
                             if i % other_count == 0:
-                                r.strategy._indicator6_value_tf = indicator6_storage[f'{r.exchange}-{r.symbol}-{r.strategy.other_tf}'][other_total-f_offset:other_total+1]
+                                r.strategy._indicator6_value_tf = indicator6_storage[other_tf_str][other_total-f_offset:other_total+1]
                     if indicator7_bool:
                         r.strategy._indicator7_value = indicator7_storage[indicator_key][total-f_offset:total+1]
                         if other_tf:
                             if i % other_count == 0:
-                                r.strategy._indicator7_value_tf = indicator7_storage[f'{r.exchange}-{r.symbol}-{r.strategy.other_tf}'][other_total-f_offset:other_total+1]
+                                r.strategy._indicator7_value_tf = indicator7_storage[other_tf_str][other_total-f_offset:other_total+1]
                     if indicator8_bool:
                         r.strategy._indicator8_value = indicator8_storage[indicator_key][total-f_offset:total+1]
                         if other_tf:
                             if i % other_count == 0:
-                                r.strategy._indicator8_value_tf = indicator8_storage[f'{r.exchange}-{r.symbol}-{r.strategy.other_tf}'][other_total-f_offset:other_total+1]
+                                r.strategy._indicator8_value_tf = indicator8_storage[other_tf_str][other_total-f_offset:other_total+1]
                     if indicator9_bool:
                         r.strategy._indicator9_value = indicator9_storage[indicator_key][total-f_offset:total+1]
                         if other_tf:
                             if i % other_count == 0:
-                                r.strategy._indicator9_value_tf = indicator9_storage[f'{r.exchange}-{r.symbol}-{r.strategy.other_tf}'][other_total-f_offset:other_total+1]
+                                r.strategy._indicator9_value_tf = indicator9_storage[other_tf_str][other_total-f_offset:other_total+1]
                     if indicator10_bool:
                         r.strategy._indicator10_value = indicator10_storage[indicator_key][total-f_offset:total+1]
                         if other_tf:
                             if i % other_count == 0:
-                                r.strategy._indicator10_value_tf = indicator10_storage[f'{r.exchange}-{r.symbol}-{r.strategy.other_tf}'][other_total-f_offset:other_total+1]
+                                r.strategy._indicator10_value_tf = indicator10_storage[other_tf_str][other_total-f_offset:other_total+1]
                     if precalc_test:
                         r.strategy.check_precalculated_indicator_accuracy()
                 # print candle
@@ -1166,7 +1196,11 @@ def skip_simulator(candles: dict,
         result['equity_curve'] = charts.equity_curve()
     if generate_quantstats:
         result['quantstats'] = _generate_quantstats_report(candles, start_date, finish_date)
-
+    if generate_backtesting_chart:
+        generateReport(indicators=indicators)
+    #if generate_lw_chart:
+    # result['first_candles_set'] = first_candles_set
+    # result['indicator_data'] = indicator1_storage[indicator_key]
     return result
     
 def initialized_strategies(hyperparameters: dict = None):

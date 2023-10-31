@@ -110,7 +110,6 @@ def generateReport(new_name: str = None, new_path: str = None, customData={}, ch
     for match in matching_indicator_names:
         matching_list.append(ta_lib_functions[match])
     matching_list = rename_duplicates(matching_list)
-    print(matching_list)
     if not config['env']['simulation']['preload_candles']:
         candles = store.candles.get_candles(router.routes[0].exchange, router.routes[0].symbol, router.routes[0].timeframe)
     else:
@@ -147,9 +146,17 @@ def generateReport(new_name: str = None, new_path: str = None, customData={}, ch
     for index, indicator in enumerate(indicators):
         unpacked = indicator[indicator_key]  # indicator data
         indicator_name = matching_list[index]
-        isVisible = 'true' if abs(unpacked[0] - first_candle_close) <= first_candle_close * 0.5 else 'false'
-        ind_dict = {"data": unpacked, "options": {"color": color_list[index]},"visible":isVisible}
-        customData[indicator_name] = ind_dict
+
+        # Check if unpacked is a tuple and handle accordingly
+        if isinstance(unpacked, tuple):
+            for tuple_index, data in enumerate(unpacked):
+                isVisible = 'true' if abs(data[0] - first_candle_close) <= first_candle_close * 0.5 else 'false'
+                ind_dict = {"data": data, "options": {"color": color_list[index]}, "visible": isVisible}
+                customData[f"{indicator_name} {tuple_index+1}"] = ind_dict
+        else:
+            isVisible = 'true' if abs(unpacked[0] - first_candle_close) <= first_candle_close * 0.5 else 'false'
+            ind_dict = {"data": unpacked, "options": {"color": color_list[index]}, "visible": isVisible}
+            customData[indicator_name] = ind_dict
 
         
     tpl = r"""
@@ -1359,7 +1366,7 @@ for (let data of lineSeriesValues) {
         
     result = template(tpl, info)
 
-    filename = "storage/JesseTradingViewLightReport/" + file_name + '.html'
+    filename = "storage/TradingViewLightReport/" + file_name + '.html'
     if new_path:
         filename= new_path + file_name + ' Interactive Chart .html'
     os.makedirs(os.path.dirname(filename), exist_ok=True)

@@ -4,6 +4,9 @@ from scipy.stats import norm
 from jesse.utils import numpy_candles_to_dataframe
 import pandas as pd 
 import random
+import random
+import numpy as np
+
 #for stock handling 
 # @njit
 # def generate_candle_from_one_minutes(timeframe: str,
@@ -138,21 +141,40 @@ def reinsert_nan(array, nan_indices):
 
     # return  open, close, high, low 
     
-#works but not true montecarlo simulation 
-def monte_carlo_candles(candles: np.array) -> np.array:
-    log_returns = (np.log(1 + (np.diff(candles) / candles[:-1] * 100)))
-    u = (np.nanmean(log_returns))
-    var = (np.nanvar(log_returns))
-    drift = u - (0.5 * var)
-    stdev = np.nanstd(log_returns)
-    rando = np.random.rand(len(candles))
-    daily_returns = np.exp(drift + stdev + rando) #1+((np.exp((drift) + (stdev) * norm.ppf(rando)*1.5))*.0001-.0001)  #
-    price_list = np.zeros_like(daily_returns)
-    price_list[0] = candles[0]
-    for d in range(1, len(candles)):
-        price_list[d] = price_list[d - 1] * daily_returns[d]    
-    print(price_list)
-    return price_list
+@njit
+def monte_carlo_simulation(candles, price_deviation_factor=0.005, volume_factor=0.1):
+    """
+    Perform a Monte Carlo simulation on candle data with more realistic constraints.
+    
+    :param candles: NumPy array, where each row contains [timestamp, open, close, high, low, volume].
+    :param price_deviation_factor: Factor to determine price deviation.
+    :param volume_factor: Factor to determine volume deviation.
+    :return: Modified candle array as NumPy array.
+    """
+    modified_candles = np.copy(candles)
+
+    for candle in modified_candles:
+        open_deviation = random.uniform(-price_deviation_factor, price_deviation_factor)
+        close_deviation = random.uniform(-price_deviation_factor, price_deviation_factor)
+        
+        # Ensure high is always greater or equal to both open and close
+        high_deviation = random.uniform(0, price_deviation_factor)
+        new_high = max(candle[1] * (1 + open_deviation), candle[2] * (1 + close_deviation)) * (1 + high_deviation)
+
+        # Ensure low is always less or equal to both open and close
+        low_deviation = random.uniform(-price_deviation_factor, 0)
+        new_low = min(candle[1] * (1 + open_deviation), candle[2] * (1 + close_deviation)) * (1 + low_deviation)
+
+        candle[1] = max(candle[1] * (1 + open_deviation), 0.01)
+        candle[2] = max(candle[2] * (1 + close_deviation), 0.01)
+        candle[3] = max(new_high, 0.01)
+        candle[4] = max(new_low, 0.01)
+
+        # Adjust volume and ensure it's always positive
+        volume_deviation = random.uniform(-volume_factor, volume_factor)
+        candle[5] = max(candle[5] * (1 + volume_deviation), 1)  # Minimum volume set to 1
+
+    return modified_candles
 
 
  

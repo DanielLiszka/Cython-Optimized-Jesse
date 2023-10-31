@@ -6,6 +6,9 @@ from jesse.info import exchange_info, jesse_supported_timeframes
 config = {
     # these values are related to the user's environment
     'env': {
+        'MonteCarlo': {
+            'deviation_factor':0.02,
+        },
         'caching': {
             'driver': 'pickle',
             'recycle': True,
