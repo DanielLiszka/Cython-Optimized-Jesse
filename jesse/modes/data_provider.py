@@ -164,6 +164,9 @@ def download_file(mode: str, file_type: str, session_id: str = None):
         path = f'storage/logs/optimize-mode.txt'
         # filename should be "optimize-" + current timestamp
         filename = f'optimize-{jh.timestamp_to_date(jh.now(True))}.txt'
+    elif mode == 'backtest' and file_type == 'backtesting-chart':
+        path = f'storage/TradingViewLightReport/{session_id}.html'
+        filename = f'backtest-{session_id}.html'
     else:
         raise Exception(f'Unknown file type: {file_type} or mode: {mode}')
 

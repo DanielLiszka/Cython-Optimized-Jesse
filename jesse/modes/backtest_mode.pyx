@@ -87,9 +87,6 @@ def run(
                 raise exceptions.Termination
         status_checker.start()
 
-    import cProfile, pstats 
-    profiler = cProfile.Profile()
-    profiler.enable()    
    
     cdef list change,data
     cdef int routes_count, index
@@ -163,9 +160,6 @@ def run(
         sync_publish('metrics', result['metrics'])
         sync_publish('equity_curve', result['equity_curve'])
 
-    profiler.disable()
-    pr_stats = pstats.Stats(profiler).sort_stats('tottime')
-    pr_stats.print_stats(50)
     
     # close database connection
     from jesse.services.db import database
