@@ -40,29 +40,29 @@ Iteration times for multiple timeframes were recorded for a backtest using the e
 ##### Optimized (Without Indicator Precalculation)
 
 ```bash
-3m : 15.14 seconds 
-5m : 9.06 seconds
-15m : 3.13 seconds
-30m : 1.65 seconds
-45m : 1.14 seconds
-1h : 0.89 seconds 
-2h : 0.52 seconds
-3h : 0.40 seconds
-4h : 0.34 seconds
+3m : 14.91 seconds 
+5m : 8.54 seconds
+15m : 3.03 seconds
+30m : 1.59 seconds
+45m : 1.09 seconds
+1h : 0.86 seconds 
+2h : 0.49 seconds
+3h : 0.38 seconds
+4h : 0.33 seconds
 ```
 
 ##### Optimized (With Indicator Precalculation and Preloaded Candles)
 
 ```bash
-3m : 3.62 seconds 
-5m : 2.21 seconds
-15m : 0.79 seconds 
-30m : 0.44 seconds
-45m : 0.35 seconds
-1h : 0.28 seconds
-2h : 0.18 seconds
-3h : 0.15 seconds
-4h : 0.13 seconds
+3m : 3.25 seconds
+5m : 2.01 seconds
+15m : 0.74 seconds 
+30m : 0.43 seconds
+45m : 0.32 seconds
+1h : 0.26 seconds
+2h : 0.17 seconds
+3h : 0.14 seconds
+4h : 0.12 seconds
 ```
 
 ## Acknowledgements
