@@ -92,9 +92,10 @@ def pvsra(candles: np.ndarray, sequential: bool = False) -> Union[np.ndarray, pd
 
 
 def generateReport(new_name: str = None, new_path: str = None, customData={}, chartConfig={}, indicators={}):
-
+    from jesse.config import config
     chartConfig={'isPvsra':True}
     cdef np.ndarray candles 
+    cdef int idx
     strategy = router.routes[0].strategy 
     
     metrics = report.portfolio_metrics()
@@ -110,15 +111,17 @@ def generateReport(new_name: str = None, new_path: str = None, customData={}, ch
     for match in matching_indicator_names:
         matching_list.append(ta_lib_functions[match])
     matching_list = rename_duplicates(matching_list)
+    indicator_key = f'{router.routes[0].exchange}-{router.routes[0].symbol}-{router.routes[0].timeframe}'
     if not config['env']['simulation']['preload_candles']:
         candles = store.candles.get_candles(router.routes[0].exchange, router.routes[0].symbol, router.routes[0].timeframe)
+        if config['env']['simulation']['precalculation']:
+            slice_amount = (abs(len(candles) - len(indicators[0][indicator_key])))
+            candles = candles[slice_amount+2:]
     else:
-        candle_key = f'{router.routes[0].exchange}-{router.routes[0].symbol}-{router.routes[0].timeframe}'
-        candles = store.candles.storage[candle_key].array[0:-1]
-
-    indicator_key = f'{router.routes[0].exchange}-{router.routes[0].symbol}-{router.routes[0].timeframe}'
-    slice_amount = strategy.slice_amount[indicator_key]
-    candles = candles[slice_amount-1:]
+        candles = store.candles.storage[indicator_key].array[0:-1]
+        slice_amount = strategy.slice_amount[indicator_key]
+        candles = candles[slice_amount-1:]
+    
     color_list = [
     "rgba(255, 99, 132, 0.7)",
     "rgba(54, 162, 235, 0.7)",
@@ -1379,7 +1382,8 @@ def generateReport(new_name: str = None, new_path: str = None, customData={}, ch
         if customData:
             for key, value in customData.items():
                 if len(value['data']) > idx:
-                    custom_data_list.append(f"{(value['data'][idx])}")
+                    # for skip simulator
+                    custom_data_list.append(f"{(value['data'][idx+1])}")
                 else:
                     custom_data_list.append("")
 
@@ -1493,8 +1497,9 @@ def generateReport(new_name: str = None, new_path: str = None, customData={}, ch
         
     if not new_path:
         import webbrowser
-        url = f'C:/Python39/Algotrading/{filename}'
-        webbrowser.open(url, new=2)  # open in new tab
+        working_path = wsl_path_to_windows(os.getcwd())
+        url = f'{working_path}/{filename}'
+        webbrowser.open(url, new=2)
     else:
         return filename
 
@@ -1638,3 +1643,14 @@ ta_lib_functions = {
     "WILLR": "Williams' %R",
     "WMA": "Weighted Moving Average"
 }
+
+def wsl_path_to_windows(wsl_path):
+    if wsl_path.startswith("/mnt/"):
+        path_without_mnt = wsl_path[5:]
+        drive_letter = path_without_mnt[0]
+        rest_of_path = path_without_mnt[2:]
+        windows_path = f"{drive_letter.upper()}:/{rest_of_path}"
+        # windows_path = windows_path.replace('/', '\\')
+        return windows_path
+    else:
+        raise wsl_path

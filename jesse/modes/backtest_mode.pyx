@@ -5,6 +5,7 @@
 
 import time
 from typing import Dict, Union, List
+import os
 # from guppy import hpy
 import arrow
 import numpy as np
@@ -47,6 +48,7 @@ from jesse.services.candle import generate_candle_from_one_minutes
 from jesse.services.numba_functions import monte_carlo_simulation, stock_candles_func
 from jesse.services.file import store_logs
 from jesse.services.validators import validate_routes
+from jesse.services.correlations import generateCorrelationTable
 from jesse.store import store
 # from jesse.services import logger
 from jesse.services.failure import register_custom_exception_handler
@@ -75,6 +77,8 @@ def run(
         chart: bool = False,
         tradingview: bool = False,
         full_reports: bool = False,
+        backtesting_chart: bool = False,
+        correlation_table: bool = False,
         csv: bool = False,
         json: bool = False
 ) -> None:
@@ -87,6 +91,9 @@ def run(
                 raise exceptions.Termination
         status_checker.start()
 
+    # import cProfile, pstats 
+    # profiler = cProfile.Profile()
+    # profiler.enable()    
    
     cdef list change,data
     cdef int routes_count, index
@@ -134,7 +141,6 @@ def run(
         
     if router.routes[0].timeframe == '1m' or router.routes[0].timeframe == '2m':
         config['env']['simulation']['skip'] = False
-        
     # run backtest simulation
     result = simulator(
         candles,
@@ -142,6 +148,8 @@ def run(
         generate_charts=chart,
         generate_tradingview=tradingview,
         generate_quantstats=full_reports,
+        generate_backtesting_chart = backtesting_chart,
+        generate_correlation_table = correlation_table,
         generate_csv=csv,
         generate_json=json,
         generate_equity_curve=True,
@@ -160,6 +168,9 @@ def run(
         sync_publish('metrics', result['metrics'])
         sync_publish('equity_curve', result['equity_curve'])
 
+    # profiler.disable()
+    # pr_stats = pstats.Stats(profiler).sort_stats('tottime')
+    # pr_stats.print_stats(50)
     
     # close database connection
     from jesse.services.db import database
@@ -307,6 +318,8 @@ def iterative_simulator(
         generate_charts: bool = False,
         generate_tradingview: bool = False,
         generate_quantstats: bool = False,
+        generate_backtesting_chart: bool = False,
+        generate_correlation_table: bool = False,
         generate_csv: bool = False,
         generate_json: bool = False,
         generate_equity_curve: bool = False,
@@ -849,11 +862,12 @@ def skip_simulator(candles: dict,
         generate_charts: bool = False,
         generate_tradingview: bool = False,
         generate_quantstats: bool = False,
+        generate_backtesting_chart: bool = False,
+        generate_correlation_table: bool = False,
         generate_csv: bool = False,
         generate_json: bool = False,
         generate_equity_curve: bool = False,
         generate_hyperparameters: bool = False,
-        generate_backtesting_chart: bool = False,
         start_date: str = None,
         finish_date: str = None,
         full_path_name: str= None,
@@ -1172,7 +1186,6 @@ def skip_simulator(candles: dict,
 
     # now that backtest simulation is finished, add finishing balance
     save_daily_portfolio_balance()
-    
     if generate_hyperparameters:
         result['hyperparameters'] = stats.hyperparameters(router.routes)
     result['metrics'] = report.portfolio_metrics()
@@ -1192,9 +1205,8 @@ def skip_simulator(candles: dict,
         result['quantstats'] = _generate_quantstats_report(candles, start_date, finish_date)
     if generate_backtesting_chart:
         generateReport(indicators=indicators)
-    #if generate_lw_chart:
-    # result['first_candles_set'] = first_candles_set
-    # result['indicator_data'] = indicator1_storage[indicator_key]
+    if generate_correlation_table:
+        generateCorrelationTable(config['app']['trading_exchanges'][0],start_date,finish_date,config['app']['trading_timeframes'][0])
     return result
     
 def initialized_strategies(hyperparameters: dict = None):

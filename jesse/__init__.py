@@ -289,6 +289,8 @@ def backtest(request_json: BacktestRequestJson, authorization: Optional[str] = H
         request_json.export_chart,
         request_json.export_tradingview,
         request_json.export_full_reports,
+        request_json.export_backtesting_chart,
+        request_json.export_correlation_table,
         request_json.export_csv,
         request_json.export_json
     )
