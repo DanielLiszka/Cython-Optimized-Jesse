@@ -90,9 +90,19 @@ def pvsra(candles: np.ndarray, sequential: bool = False) -> Union[np.ndarray, pd
 
     return df if sequential else df.iloc[-1]
 
+def find_significant_drop(indicators, threshold):
+    for i in range(len(indicators) - 2, -1, -1):
+        current_value = indicators[i]
+        next_value = indicators[i + 1]
+        # Calculate the percentage change relative to the next value
+        if abs((current_value - next_value) / current_value) < threshold:
+            return i
+    return 0  # Return 0 if no significant drop is found
 
-def generateReport(new_name: str = None, new_path: str = None, customData={}, chartConfig={}, indicators={}):
+
+def generateReport(new_name: str = None, new_path: str = None, customData={}, chartConfig={}, indicators={}, start=None):
     from jesse.config import config
+    from jesse.helpers import date_to_timestamp
     chartConfig={'isPvsra':True}
     cdef np.ndarray candles 
     cdef int idx
@@ -115,8 +125,26 @@ def generateReport(new_name: str = None, new_path: str = None, customData={}, ch
     if not config['env']['simulation']['preload_candles']:
         candles = store.candles.get_candles(router.routes[0].exchange, router.routes[0].symbol, router.routes[0].timeframe)
         if config['env']['simulation']['precalculation']:
-            slice_amount = (abs(len(candles) - len(indicators[0][indicator_key])))
-            candles = candles[slice_amount+2:]
+            if router.routes[0].exchange not in ['Polygon_Stocks','Polygon_Forex']:
+                slice_amount = (abs(len(candles) - len(indicators[0][indicator_key])))
+                candles = candles[slice_amount:]
+            else:
+                indicator_copy = indicators[0][indicator_key]
+                indicator_copy = [value for value in indicator_copy if value >= 0.01]
+                threshold = 0.02  # 1% change
+                drop_index = find_significant_drop(indicator_copy, threshold)
+                # If a significant drop was found, truncate the list up to that point
+                if drop_index > 0:
+                    indicator_copy = indicator_copy[:drop_index + 1]
+                slice_amount = (abs(len(candles) - len(indicator_copy))) 
+                candles = candles[slice_amount:]
+            # Set the first chart candle to the first backtest candle
+            first_timestamp = date_to_timestamp(start)
+            for i in range(100):
+                timestamp = candles[i][0]
+                if timestamp == first_timestamp:
+                    break
+            candles = candles[i:]
     else:
         candles = store.candles.storage[indicator_key].array[0:-1]
         slice_amount = strategy.slice_amount[indicator_key]
@@ -926,9 +954,9 @@ def generateReport(new_name: str = None, new_path: str = None, customData={}, ch
             }
         }
 
-        setTooltipHtml(symbolName, time, bar.open.toFixed(1),
-        bar.close.toFixed(1), bar.high.toFixed(1),
-        bar.low.toFixed(1), volume_value, color, pnl_value, pnl_color, pnl_icon, lineSeriesValues);
+        setTooltipHtml(symbolName, time, bar.open.toFixed(2),
+        bar.close.toFixed(2), bar.high.toFixed(2),
+        bar.low.toFixed(2), volume_value, color, pnl_value, pnl_color, pnl_icon, lineSeriesValues);
     };
 
               chart.subscribeCrosshairMove(updateLegend);

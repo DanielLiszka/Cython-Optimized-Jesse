@@ -1204,7 +1204,7 @@ def skip_simulator(candles: dict,
     if generate_quantstats:
         result['quantstats'] = _generate_quantstats_report(candles, start_date, finish_date)
     if generate_backtesting_chart:
-        generateReport(indicators=indicators)
+        generateReport(indicators=indicators,start=start_date)
     if generate_correlation_table:
         generateCorrelationTable(config['app']['trading_exchanges'][0],start_date,finish_date,config['app']['trading_timeframes'][0])
     return result
