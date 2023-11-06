@@ -5,26 +5,21 @@ from config import config
 import numpy as np
 import itertools
 from jesse import research
+import pandas as pd
 import json
 import datetime
 from pathlib import Path
 from jesse.helpers import date_to_timestamp
 
 def generateCorrelationTable(exchange,start_date,finish_date,timeframe):
+    import jesse.helpers as jh
     start = date_to_timestamp(start_date)
     finish = date_to_timestamp(finish_date)
     if exchange in ['Polygon_Stocks','Polygon_Forex']:
-        print('Stocks or Forex are not supported yet')
-        return
-        # try:
-            # pairs = get_stocks_with_enough_candles(exchange,start,finish)
-        # except Exception as e:
-            # print(e)
+        pairs = get_stocks_with_enough_candles(exchange,start,finish)
     else:
-        try: 
-            pairs = get_crypto_with_enough_candles(exchange,start,finish)
-        except Exception as e:
-            print(e)
+        pairs = get_crypto_with_enough_candles(exchange,start,finish)
+
             
     count = len(pairs)
     grid = np.ones(shape=(count, count))
@@ -70,7 +65,7 @@ def generateCorrelationTable(exchange,start_date,finish_date,timeframe):
 
     Path("./storage/correlations").mkdir(parents=True, mode=0o777, exist_ok=True)
 
-    file_name = "storage/correlations/correlation__{}.html".format(datetime.datetime.today().strftime("%Y-%m-%d__%H-%M"))
+    file_name = f"storage/correlations/{jh.get_session_id()}.html"
 
     with open(file_name, 'w') as file:
         file.write(file_data)
@@ -128,8 +123,22 @@ def get_crypto_with_enough_candles(exchange_name: str, start_timestamp: str, end
     return symbols_with_enough_candles
 
 def get_stocks_with_enough_candles(exchange,start_date,finish_date):
-    pass
-    
+    pairs = []
+    if exchange == 'Polygon_Stocks':
+        directory = 'storage/temp/stock bars'
+    else:
+        directory = 'storage/temp/forex bars'
+        
+    filenames = [f for f in os.listdir(directory) if os.path.isfile(os.path.join(directory, f))]
+    for file in filenames:
+        file_path = f'{directory}/{file}'
+        csv_data = pd.read_csv(file_path)
+        column = csv_data['t']
+        if column.iloc[0] < start_date and column.iloc[-1] > finish_date:
+            pairs.append(str(file.split('.')[0]))
+    return pairs
+            
+
 
 def wsl_path_to_windows(wsl_path):
     if wsl_path.startswith("/mnt/"):

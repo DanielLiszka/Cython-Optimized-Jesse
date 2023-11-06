@@ -71,7 +71,10 @@ class Polygon_Stocks(RESTClient):
         try:
             old_df = pd.read_csv(f'storage/temp/stock bars/{ticker}.csv')
             old_df_lasttime = old_df['t'].iloc[-1]
+            old_df_firsttime = old_df['t'].iloc[0]
             old_df = old_df.append(df[df['t'] > old_df_lasttime])
+            prepend_data = df[df['t'] < old_df_firsttime]
+            old_df = pd.concat([prepend_data, old_df]).sort_values(by='t').reset_index(drop=True)
             df = old_df
             df.to_csv(f'storage/temp/stock bars/{ticker}.csv', sep=',', index=False) 
         except FileNotFoundError:
