@@ -139,7 +139,7 @@ def run(
         # routes info
         sync_publish('routes_info', stats.routes(router.routes))
         
-    if router.routes[0].timeframe == '1m' or router.routes[0].timeframe == '2m':
+    if router.routes[0].timeframe == '1m': # or router.routes[0].timeframe == '2m':
         config['env']['simulation']['skip'] = False
     # run backtest simulation
     result = simulator(
@@ -1248,11 +1248,10 @@ def initialized_strategies(hyperparameters: dict = None):
                            config['app']['considering_timeframes'] if timeframe != '1m']
     # smaller timeframe is dividing DAY_1 & I down want bigger timeframe to be the skipper
     # because it fast enough with 1 day + higher timeframes are better to check every day ( 1M / 1W / 3D )
-    if timeframes.DAY_1 not in consider_timeframes:
-        consider_timeframes.append(jh.timeframe_to_one_minutes(timeframes.DAY_1))
-
+    #if timeframes.DAY_1 not in consider_timeframes:
+        #consider_timeframes.append(jh.timeframe_to_one_minutes(timeframes.DAY_1))
     # for cases where only 1m is used in this simulation
-    if not consider_timeframes:
+    if consider_timeframes == []:
         return 1
     # take the greatest common divisor for that purpose
     return np.gcd.reduce(consider_timeframes),r.strategy

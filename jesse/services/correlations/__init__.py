@@ -1,7 +1,6 @@
 import os
 import time
 import sys
-from config import config
 import numpy as np
 import itertools
 from jesse import research
