@@ -16,8 +16,8 @@ config = {
         'simulation': {
             'Montecarlo': False, 
             'skip': True,
-            'precalculation':True,
-            'preload_candles':True,
+            'precalculation':False,
+            'preload_candles':False,
             'precalc_test': False,
             'previous_precalc_values': 1,
             'analyze':False,

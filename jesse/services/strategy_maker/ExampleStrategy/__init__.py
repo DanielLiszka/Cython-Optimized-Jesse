@@ -3,74 +3,77 @@ import jesse.indicators as ta
 from jesse import utils
 
 # if indicators are precalcualted then the most recent values are found in "self._indicator1_value".
+# Higher timeframe precalculated indicators values are in the "_indicator1_value_tf" variable. 
+# Values are calculated up to the last higher timeframe candle close. Only one other timeframe supported for now. 
+# If candles are pregenerated then the current candle value is found in "self._current_candle".
 # The ability to precalcualte indicators and pregenerate candles is toggled in the config file
 
 class ExampleStrategy(Strategy):
 
-    def _indicator1(self,precalc_candles = None):
+    def _indicator1(self,precalc_candles = None,sequential=False):
         return None
    
     @property
     def _indicator1_test(self):
         return None
         
-    def _indicator2(self,precalc_candles = None):
+    def _indicator2(self,precalc_candles = None,sequential=False):
         return None
    
     @property
     def _indicator2_test(self):
         return None
                
-    def _indicator3(self,precalc_candles=None):
+    def _indicator3(self,precalc_candles = None,sequential=False):
         return None
    
     @property
     def _indicator3_test(self):
         return None
       
-    def _indicator4(self, precalc_candles=None):
+    def _indicator4(self,precalc_candles = None,sequential=False):
         return None
             
     @property
     def _indicator4_test(self):
         return None
 
-    def _indicator5(self, precalc_candles=None):
+    def _indicator5(self,precalc_candles = None,sequential=False):
         return None
     
     @property
     def _indicator5_test(self):
         return None
 
-    def _indicator6(self,precalc_candles=None):
+    def _indicator6(self,precalc_candles = None,sequential=False):
         return None
         
     @property 
     def _indicator6_test(self):
         return None
 
-    def _indicator7(self,precalc_candles=None):
+    def _indicator7(self,precalc_candles = None,sequential=False):
         return None
         
     @property
     def _indicator7_test(self):
         return None
     
-    def _indicator8(self, precalc_candles=None):
+    def _indicator8(self,precalc_candles = None,sequential=False):
         return None
         
     @property
     def _indicator8_test(self):
         return None
         
-    def _indicator9(self, precalc_candles=None):
+    def _indicator9(self,precalc_candles = None,sequential=False):
         return None
         
     @property
     def _indicator9_test(self):
         return None
         
-    def _indicator10(self, precalc_candles=None):
+    def _indicator10(self,precalc_candles = None,sequential=False):
         return None
         
     @property
