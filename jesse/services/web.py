@@ -48,6 +48,39 @@ class OptimizationRequestJson(BaseModel):
     export_csv: bool
     export_json: bool
 
+class OptunaRequestJson(BaseModel):
+    id: str
+    checked_study: bool
+    continueExistingStudy: bool
+    routes: List[Dict[str, str]]
+    extra_routes: List[Dict[str, str]]
+    config: dict
+    start_date: str
+    finish_date: str
+    optimal_total: int
+    debug_mode: bool
+    optimizer: str
+    fitnessMetric1: str
+    fitnessMetric2: str
+    isMultivariate: bool
+    secondObjectiveDirection: str
+    consider_prior: bool
+    prior_weight: float
+    n_startup_trials: int
+    n_ei_candidates: int
+    gamma: float
+    group: bool 
+    sigma: float
+    consider_pruned_trials: bool
+    population_size: int
+    crossover_prob: float
+    swapping_prob: float
+    qmc_type: str
+    scramble: bool
+
+class OptunaSpecialRequestJson(BaseModel):
+    id: str
+    string: str
 
 class ImportCandlesRequestJson(BaseModel):
     id: str

@@ -2,10 +2,10 @@ import asyncio
 import json
 import os
 import warnings
-from typing import Optional
+from typing import Optional, Union
 import click
 import pkg_resources
-from fastapi import BackgroundTasks, Query, Header
+from fastapi import BackgroundTasks, Query, Header, Depends, Request
 from starlette.websockets import WebSocket, WebSocketDisconnect
 from fastapi.responses import JSONResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
@@ -13,7 +13,7 @@ from jesse.services import auth as authenticator
 from jesse.services.redis import async_redis, async_publish, sync_publish
 from jesse.services.web import fastapi_app, BacktestRequestJson, ImportCandlesRequestJson, CancelRequestJson, \
     LoginRequestJson, ConfigRequestJson, LoginJesseTradeRequestJson, NewStrategyRequestJson, FeedbackRequestJson, \
-    ReportExceptionRequestJson, OptimizationRequestJson
+    ReportExceptionRequestJson, OptimizationRequestJson, OptunaRequestJson, OptunaSpecialRequestJson
 import uvicorn
 from asyncio import Queue
 import jesse.helpers as jh
@@ -337,6 +337,91 @@ def cancel_optimization(request_json: CancelRequestJson, authorization: Optional
     process_manager.cancel_process('optimize-' + request_json.id)
 
     return JSONResponse({'message': f'Optimization process with ID of {request_json.id} was requested for termination'}, status_code=202)
+
+
+async def get_request_model(request: Request):
+    body = await request.json()
+    if "string" in body:
+        return OptunaSpecialRequestJson(**body)
+    else:
+        return OptunaRequestJson(**body)
+        
+@fastapi_app.post("/optuna")
+async def optuna(
+    request_json: Union[OptunaRequestJson, OptunaSpecialRequestJson] = Depends(get_request_model),
+    authorization: Optional[str] = Header(None)
+):
+
+    if not authenticator.is_valid_token(authorization):
+        return authenticator.unauthorized_response()
+    from jesse.services.multiprocessing_module import process_manager
+
+    validate_cwd()
+    # Handle the special actions
+    if isinstance(request_json, OptunaSpecialRequestJson):
+        if request_json.string == "reset_database":
+            from jesse.modes.optuna_optimize_mode import clear_database
+            process_manager.add_task(clear_database, 'optuna-' + str(request_json.id))
+            return JSONResponse({'message': 'Cleared Optuna Database'}, status_code=202)
+        elif request_json.string == "reset_cache":
+            from jesse.modes.optuna_optimize_mode import clear_cache
+            process_manager.add_task(clear_cache, 'optuna-' + str(request_json.id))
+            return JSONResponse({'message': 'Cleared Joblib Memory'}, status_code=202)
+        
+    
+    elif isinstance(request_json, OptunaRequestJson):
+        from jesse.modes.optuna_optimize_mode import run as run_optuna
+        from jesse.modes.optuna_optimize_mode import check_study_exists
+        study_exists = True#check_study_exists(request_json.routes[0]['strategy']) 
+        if study_exists and not request_json.checked_study:
+            return JSONResponse({"study_exists": True, "message": "A study with the same name already exists."}, status_code=200)
+
+        process_manager.add_task(
+            run_optuna,
+            'optuna-' + str(request_json.id),
+            request_json.checked_study,
+            request_json.continueExistingStudy,
+            request_json.debug_mode,
+            request_json.config,
+            request_json.routes,
+            request_json.extra_routes,
+            request_json.start_date,
+            request_json.finish_date,
+            request_json.optimal_total,
+            request_json.optimizer,
+            request_json.fitnessMetric1,
+            request_json.fitnessMetric2,
+            request_json.isMultivariate,
+            request_json.secondObjectiveDirection,
+            request_json.consider_prior,
+            request_json.prior_weight,
+            request_json.n_startup_trials,
+            request_json.n_ei_candidates,
+            request_json.gamma,
+            request_json.group,
+            request_json.sigma,
+            request_json.consider_pruned_trials,
+            request_json.population_size,
+            request_json.crossover_prob,
+            request_json.swapping_prob,
+            request_json.qmc_type,
+            request_json.scramble
+        )
+
+        return JSONResponse({'message': 'Started optuna...'}, status_code=202)
+    else:
+        raise HTTPException(status_code=400, detail="Invalid Request Type")
+
+@fastapi_app.delete("/optuna")
+def cancel_optuna(request_json: CancelRequestJson, authorization: Optional[str] = Header(None)):
+    if not authenticator.is_valid_token(authorization):
+        return authenticator.unauthorized_response()
+
+    from jesse.services.multiprocessing_module import process_manager
+
+    process_manager.cancel_process('optuna-' + request_json.id)
+
+    return JSONResponse({'message': f'optuna process with ID of {request_json.id} was requested for termination'}, status_code=202)
 
 
 @fastapi_app.get("/download/{mode}/{file_type}/{session_id}")

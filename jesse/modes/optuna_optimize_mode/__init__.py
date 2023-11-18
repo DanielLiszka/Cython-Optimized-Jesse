@@ -16,6 +16,7 @@ import traceback
 import webbrowser
 import math
 import ast
+from jesse.routes import router
 import random
 import spectra
 from PIL import Image
@@ -86,12 +87,53 @@ memory = Memory(cachedir, verbose=0)
 def cli() -> None:
     pass
 
-@cli.command()
 def clear_cache() -> None: 
-    if click.confirm(Fore.RED +'Are you sure?', default=False):
-        memory.clear(warn=False)
-        exit(1)
-        
+    memory.clear(warn=False)
+
+def clear_database() -> None:
+    from jesse.services.env import ENV_VALUES as cfg
+    import psycopg2
+    from psycopg2 import sql
+
+    db_name = 'optuna_db'
+    db_user = 'jesse_user' #'optuna_user'
+    db_password = cfg['POSTGRES_PASSWORD'] 
+    db_host = cfg['POSTGRES_HOST'] 
+    db_port = cfg['POSTGRES_PORT'] 
+
+    # Connect to the default database (or another database that is not being deleted)
+    conn = psycopg2.connect(
+        dbname="postgres",  # default database
+        user=db_user,
+        password=db_password,
+        host=db_host,
+        port=db_port
+    )
+    conn.autocommit = True  # Required for database creation and dropping
+
+    try:
+        # Open a cursor to perform database operations
+        cur = conn.cursor()
+
+        # Drop the existing database
+        cur.execute(sql.SQL("DROP DATABASE IF EXISTS {}").format(sql.Identifier(db_name)))
+
+        # Create a new database
+        cur.execute(sql.SQL("CREATE DATABASE {}").format(sql.Identifier(db_name)))
+
+        print("Database recreated successfully.")
+
+    except Exception as e:
+        print(f"An error occurred: {e}")
+
+    finally:
+        # Close communication with the database
+        if cur is not None:
+            cur.close()
+        if conn is not None:
+            conn.close()
+            
+
 @cli.command()
 def create_config() -> None:
     validate_cwd()
@@ -122,8 +164,61 @@ def create_db(db_name: str) -> None:
     # Closing the connection
     conn.close()
 
-@cli.command()
-def run() -> None:
+def check_study_exists(study_name):
+    try:
+        from jesse.services.env import ENV_VALUES as cfg
+        db_name = 'optuna_db'
+        user = 'optuna_user'
+        password = cfg['POSTGRES_PASSWORD']
+        host = cfg['POSTGRES_HOST']
+        port = cfg['POSTGRES_PORT']
+        # Connect to the PostgreSQL database server
+        conn = psycopg2.connect(dbname=db_name, user=user, password=password, host=host, port=port)
+
+        cur = conn.cursor()
+
+        cur.execute("SELECT COUNT(*) FROM studies WHERE study_name = %s", (study_name,))
+
+        result = cur.fetchone()
+        exists = result[0] > 0
+
+        cur.close()
+        conn.close()
+
+        return exists
+
+    except (Exception) as error:
+        return False
+        
+        
+def run(checked_study:bool, 
+        continueExistingStudy: bool,
+        debug_mode: bool, 
+        config: dict, 
+        routes: list, 
+        extra_routes: list, 
+        start_date: str, 
+        finish_date: str, 
+        optimal_total: int,
+        optimizer: str,
+        fitnessMetric1: str,
+        fitnessMetric2: str,
+        isMultivariate: bool,
+        secondObjectiveDirection: str,
+        consider_prior: bool,
+        prior_weight: float,
+        n_startup_trials: int,
+        n_ei_candidates: int,
+        gamma: float,
+        group: bool,
+        sigma: float,
+        consider_pruned_trials: bool,
+        population_size: int,
+        crossover_prob: float,
+        swapping_prob: float,
+        qmc_type: str,
+        scramble: bool):
+        
     validate_cwd()
     #backup config file in case corruption occurs
     source = "optuna_config.yml"
@@ -134,12 +229,14 @@ def run() -> None:
     except shutil.SameFileError:
         os.remove(destination)
         shutil.copy(source, destination)
-    
-    cfg = get_config()
-    start_date = cfg['timespan-train']['start_date']
-    finish_date = cfg['timespan-train']['finish_date']
+
+    print('running')
+    #cfg = get_config()
+    from jesse.services.env import ENV_VALUES as cfg
+    #start_date = start_date #cfg['timespan-train']['start_date']
+    #finish_date = finish_date #cfg['timespan-train']['finish_date']
     # {cfg['optimizer']}-{len(cfg['route'].items())} Pairs
-    study_name = f"{cfg['strategy_name']}-{cfg['route'][0]['exchange']}-{cfg['route'][0]['symbol']}-{cfg['route'][0]['timeframe']}-{start_date}-{finish_date}"
+    study_name = f"{routes[0]['strategy']}-{routes[0]['exchange']}-{routes[0]['symbol']}-{routes[0]['timeframe']}-{start_date}-{finish_date}"
     storage = f"postgresql://{cfg['postgres_username']}:{cfg['postgres_password']}@{cfg['postgres_host']}:{cfg['postgres_port']}/{cfg['postgres_db_name']}"
     #pruners defined with optimizer
     defined_pruner = None
