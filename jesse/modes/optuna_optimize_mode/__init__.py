@@ -70,7 +70,7 @@ from openpyxl.utils.cell import coordinate_from_string, get_column_letter
 # import matplotlib.pyplot as plt 
 
 #Dashboard Command
-# optuna-dashboard postgresql://optuna_user:optuna_password@localhost/optuna_db
+# optuna-dashboard postgresql://jesse_user:optuna_password@localhost/optuna_db
 
 logger = logging.getLogger()
 logger.addHandler(logging.FileHandler("jesse-optuna.log", mode="w"))
@@ -91,15 +91,15 @@ def clear_cache() -> None:
     memory.clear(warn=False)
 
 def clear_database() -> None:
-    from jesse.services.env import ENV_VALUES as cfg
+    from jesse.services.env import ENV_VALUES as cfg_
     import psycopg2
     from psycopg2 import sql
 
     db_name = 'optuna_db'
-    db_user = 'jesse_user' #'optuna_user'
-    db_password = cfg['POSTGRES_PASSWORD'] 
-    db_host = cfg['POSTGRES_HOST'] 
-    db_port = cfg['POSTGRES_PORT'] 
+    db_user = 'jesse_user'
+    db_password = cfg_['POSTGRES_PASSWORD'] 
+    db_host = cfg_['POSTGRES_HOST'] 
+    db_port = cfg_['POSTGRES_PORT'] 
 
     # Connect to the default database (or another database that is not being deleted)
     conn = psycopg2.connect(
@@ -141,16 +141,15 @@ def create_config() -> None:
     package_dir = pathlib.Path(__file__).resolve().parent
     shutil.copy2(f'{package_dir}/optuna_config.yml', f'{target_dirname}/optuna_config.yml')
 
-@cli.command()
-@click.argument('db_name', required=True, type=str)
-def create_db(db_name: str) -> None:
-    validate_cwd()
-    cfg = get_config()
-    import psycopg2
+def create_db() -> None:
 
+    validate_cwd()
+    import psycopg2
+    from jesse.services.env import ENV_VALUES as cfg_
+    db_name = 'optuna_db'
     # establishing the connection
     conn = psycopg2.connect(
-        database="postgres", user=cfg['postgres_username'], password=cfg['postgres_password'], host=cfg['postgres_host'], port=cfg['postgres_port']
+        database="postgres", user='jesse_user', password=cfg_['POSTGRES_PASSWORD'], host=cfg_['POSTGRES_HOST'], port=cfg_['POSTGRES_PORT']
     )
     conn.autocommit = True
 
@@ -159,19 +158,19 @@ def create_db(db_name: str) -> None:
 
     # Creating a database
     cursor.execute('CREATE DATABASE ' + str(db_name))
-    print(f"Database {db_name} created successfully........")
+    print(f"Database {db_name} created successfully...")
 
     # Closing the connection
     conn.close()
 
 def check_study_exists(study_name):
     try:
-        from jesse.services.env import ENV_VALUES as cfg
+        from jesse.services.env import ENV_VALUES as cfg_
         db_name = 'optuna_db'
-        user = 'optuna_user'
-        password = cfg['POSTGRES_PASSWORD']
-        host = cfg['POSTGRES_HOST']
-        port = cfg['POSTGRES_PORT']
+        user = 'jesse_user'
+        password = cfg_['POSTGRES_PASSWORD']
+        host = cfg_['POSTGRES_HOST']
+        port = cfg_['POSTGRES_PORT']
         # Connect to the PostgreSQL database server
         conn = psycopg2.connect(dbname=db_name, user=user, password=password, host=host, port=port)
 
@@ -190,8 +189,55 @@ def check_study_exists(study_name):
     except (Exception) as error:
         return False
         
-        
-def run(checked_study:bool, 
+def database_exists():
+    import psycopg2
+    conn = None
+    exists = False
+    dbname = 'optuna_db'
+    user = 'jesse_user'
+    from jesse.services.env import ENV_VALUES as cfg
+    password = cfg['POSTGRES_PASSWORD']
+    host = cfg['POSTGRES_HOST']
+    port = cfg['POSTGRES_PORT']
+    try:
+        # Connect to the PostgreSQL server
+        conn = psycopg2.connect(dbname='postgres', user=user, password=password, host=host, port=port)
+        conn.autocommit = True
+
+        # Create a cursor object
+        cur = conn.cursor()
+
+        # Check if the database exists
+        cur.execute(sql.SQL("SELECT 1 FROM pg_database WHERE datname = %s;"), (dbname,))
+        exists = cur.fetchone() is not None
+
+        # Close the cursor and connection
+        cur.close()
+    except psycopg2.Error as e:
+        print(f"Database check failed: {e}")
+    finally:
+        if conn is not None:
+            conn.close()
+
+    return exists
+    
+def divide_date_range(start_date, finish_date, ratio=0.85):
+
+    start_date_obj = datetime.strptime(start_date, '%m-%d-%Y')
+    finish_date_obj = datetime.strptime(finish_date, '%m-%d-%Y')
+    total_duration = finish_date_obj - start_date_obj
+    first_period_duration = timedelta(days=total_duration.days * ratio)
+    first_period_end = start_date_obj + first_period_duration
+    first_period_end_rounded = first_period_end.replace(day=1)
+    second_period_start = first_period_end_rounded
+
+    return (
+        (start_date, first_period_end_rounded.strftime('%m-%d-%Y')),
+        (second_period_start.strftime('%m-%d-%Y'), finish_date)
+    )
+    
+cfg = {}
+def run(
         continueExistingStudy: bool,
         debug_mode: bool, 
         config: dict, 
@@ -217,33 +263,130 @@ def run(checked_study:bool,
         crossover_prob: float,
         swapping_prob: float,
         qmc_type: str,
-        scramble: bool):
+        scramble: bool,
+        n_trials: int):
         
     validate_cwd()
-    #backup config file in case corruption occurs
-    source = "optuna_config.yml"
-    destination = "./storage/jesse-optuna/optuna_config.yml"
-    
-    try:
-        shutil.copy(source, destination)
-    except shutil.SameFileError:
-        os.remove(destination)
-        shutil.copy(source, destination)
+    db_exists = database_exists()
+    if not db_exists:
+        create_db()
 
-    print('running')
     #cfg = get_config()
-    from jesse.services.env import ENV_VALUES as cfg
-    #start_date = start_date #cfg['timespan-train']['start_date']
-    #finish_date = finish_date #cfg['timespan-train']['finish_date']
+
+    global cfg 
+    from jesse.services.env import ENV_VALUES as _cfg_
+    cfg = {
+        "debug_mode": debug_mode,
+        "type": config['exchange']['type'],
+        "validation_interval": 90,
+        "warm_up_candles": config['warm_up_candles'],
+        "settlement_currency": "USD",
+        "starting_balance": config['exchange']['balance'],
+        "strategy_name": routes[0]['strategy'],
+        "postgres_db_name": "optuna_db",
+        "postgres_host": _cfg_['POSTGRES_HOST'],
+        "postgres_password": _cfg_['POSTGRES_PASSWORD'],
+        "postgres_port": _cfg_['POSTGRES_PORT'],
+        "postgres_username": "jesse_user",
+        "robust_test_iteration_count": 3,
+        "robust_test_max": 6,
+        "robust_test_min": 1.5,
+        "dual_mode": secondObjectiveDirection,
+        "fee": config['exchange']['fee'],
+        "fitness-ratio1": fitnessMetric1,
+        "fitness-ratio2": fitnessMetric2,
+        "futures_leverage": config['exchange']['futures_leverage_mode'],
+        "futures_leverage_mode": config['exchange']['futures_leverage_mode'],
+        "max_final_number_of_validation_results": 64,
+        "mode": isMultivariate,
+        "n_jobs": config['cpu_cores'],
+        "n_trials": n_trials,
+        "optimal-total": optimal_total,
+        "optimizer": optimizer,
+        "Interval_end": '2023-09-01',
+        "Interval_start": '2018-01-01',
+        "timespan-testing": {
+            "finish_date": finish_date, 
+            "start_date": start_date,
+            },
+        "timespan-train": {
+            "finish_date": finish_date, 
+            "start_date": start_date,
+            },
+        }
+        # Optimizer-specific settings
+    optimizer_settings = {
+        'TPESampler': {
+            "consider_prior": consider_prior,
+            "prior_weight": prior_weight,
+            "n_startup_trials": n_startup_trials,
+            "n_ei_candidates": n_ei_candidates,
+            "gamma": gamma,
+            "group": group
+        },
+        'NSGAIISampler': {
+            "population_size": population_size,
+            "crossover_prob": crossover_prob,
+            "swapping_prob": swapping_prob
+        },
+        'CmaEsSampler': {
+            "sigma": sigma,  
+            "n_startup_trials": n_startup_trials,
+            "consider_pruned_trials": consider_pruned_trials 
+        },
+        'NSGAIIISampler': {
+            "population_size": population_size,
+            "crossover_prob": crossover_prob,
+            "swapping_prob": swapping_prob
+        },
+        'MOTPESampler': {
+            "consider_prior": consider_prior,
+            "prior_weight": prior_weight,
+            "n_startup_trials": n_startup_trials,
+            "n_ei_candidates": n_ei_candidates,
+            "gamma": gamma
+        },
+        'QMCSampler': {
+            "qmc_type": qmc_type,
+            "scramble": scramble
+        },
+        'GridSampler': {},
+        'RandomSampler': {},
+        'BruteForceSampler': {}
+        # Add additional settings for other samplers if needed
+    }
+
+    # Add selected optimizer's settings to global config
+    if optimizer in optimizer_settings:
+        cfg[optimizer] = optimizer_settings[optimizer]
+
+    # Additional settings based on multivariate mode
+    if isMultivariate:
+        cfg["secondObjectiveDirection"] = secondObjectiveDirection
+
+    
+    
+    
+    
+    
+    
+    
+    from jesse.services.env import ENV_VALUES as cfg_
+    start_date = cfg['timespan-train']['start_date']
+    finish_date = cfg['timespan-train']['finish_date']
     # {cfg['optimizer']}-{len(cfg['route'].items())} Pairs
     study_name = f"{routes[0]['strategy']}-{routes[0]['exchange']}-{routes[0]['symbol']}-{routes[0]['timeframe']}-{start_date}-{finish_date}"
-    storage = f"postgresql://{cfg['postgres_username']}:{cfg['postgres_password']}@{cfg['postgres_host']}:{cfg['postgres_port']}/{cfg['postgres_db_name']}"
+    storage = f"postgresql://jesse_user:{cfg_['POSTGRES_PASSWORD']}@{cfg_['POSTGRES_HOST']}:{cfg_['POSTGRES_PORT']}/optuna_db"
     #pruners defined with optimizer
     defined_pruner = None
     if cfg['optimizer'] == 'GridSampler': 
         sampler = optuna.samplers.GridSampler()
+    elif cfg['optimizer'] == 'BruteForceSampler':
+        sampler = optuna.samplers.BrutgeForceSampler()
+    elif cfg['optimizer'] == 'QMCSampler':
+        sampler = optuna.samplers.QMCSampler(qmc_type=cfg[cfg['optimizer']]['qmc_type'], scramble=cfg[cfg['optimizer']]['scramble'])
     elif cfg['optimizer'] == 'CmaEsSampler':
-        sampler = optuna.samplers.CmaEsSampler(with_margin=True)
+        sampler = optuna.samplers.CmaEsSampler(sigma0=cfg[cfg['optimizer']]['sigma'],n_startup_trials=cfg[cfg['optimizer']]['n_startup_trials'],consider_pruned_trials=cfg[cfg['optimizer']]['consider_pruned_trials'])
     elif cfg['optimizer'] == 'RandomSampler':
         sampler = optuna.samplers.RandomSampler()
     elif cfg['optimizer'] == 'NSGAIISampler': 
@@ -260,7 +403,7 @@ def run(checked_study:bool,
     optuna.logging.set_verbosity(10)
     optuna.logging.enable_propagation()
     optuna.logging.enable_default_handler()
-    c = ['optuna-dashboard','postgresql://optuna_user:optuna_password@localhost/optuna_db']
+    c = ['optuna-dashboard','postgresql://jesse_user:optuna_password@localhost/optuna_db']
     handle = subprocess.Popen(c, stdin=PIPE, stderr=PIPE, stdout=PIPE, shell=False)
     if click.confirm(Fore.GREEN + Style.BRIGHT +'Multi-objective optimization search?', default=True):
         mode = 'multi'

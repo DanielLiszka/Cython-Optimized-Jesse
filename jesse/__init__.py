@@ -372,14 +372,13 @@ async def optuna(
     elif isinstance(request_json, OptunaRequestJson):
         from jesse.modes.optuna_optimize_mode import run as run_optuna
         from jesse.modes.optuna_optimize_mode import check_study_exists
-        study_exists = True#check_study_exists(request_json.routes[0]['strategy']) 
+        study_exists = check_study_exists(request_json.routes[0]['strategy']) 
         if study_exists and not request_json.checked_study:
             return JSONResponse({"study_exists": True, "message": "A study with the same name already exists."}, status_code=200)
 
         process_manager.add_task(
             run_optuna,
             'optuna-' + str(request_json.id),
-            request_json.checked_study,
             request_json.continueExistingStudy,
             request_json.debug_mode,
             request_json.config,
@@ -405,7 +404,8 @@ async def optuna(
             request_json.crossover_prob,
             request_json.swapping_prob,
             request_json.qmc_type,
-            request_json.scramble
+            request_json.scramble,
+            request_json.n_trials
         )
 
         return JSONResponse({'message': 'Started optuna...'}, status_code=202)
