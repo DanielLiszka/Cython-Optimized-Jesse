@@ -191,6 +191,7 @@ def check_study_exists(study_name):
         
 def database_exists():
     import psycopg2
+    from psycopg2 import sql
     conn = None
     exists = False
     dbname = 'optuna_db'
@@ -222,9 +223,8 @@ def database_exists():
     return exists
     
 def divide_date_range(start_date, finish_date, ratio=0.85):
-
-    start_date_obj = datetime.strptime(start_date, '%m-%d-%Y')
-    finish_date_obj = datetime.strptime(finish_date, '%m-%d-%Y')
+    start_date_obj = datetime.strptime(start_date, '%Y-%m-%d')
+    finish_date_obj = datetime.strptime(finish_date, '%Y-%m-%d')
     total_duration = finish_date_obj - start_date_obj
     first_period_duration = timedelta(days=total_duration.days * ratio)
     first_period_end = start_date_obj + first_period_duration
@@ -232,9 +232,29 @@ def divide_date_range(start_date, finish_date, ratio=0.85):
     second_period_start = first_period_end_rounded
 
     return (
-        (start_date, first_period_end_rounded.strftime('%m-%d-%Y')),
-        (second_period_start.strftime('%m-%d-%Y'), finish_date)
+        [start_date, first_period_end_rounded.strftime('%Y-%m-%d'),
+        second_period_start.strftime('%Y-%m-%d'), finish_date]
     )
+    
+def format_routes_to_dict(routes):
+    formatted_routes = {"route": {}}
+    for index, route in enumerate(routes):
+        formatted_routes["route"][index] = {
+            "exchange": route.get("exchange", ""),
+            "symbol": route.get("symbol", ""),
+            "timeframe": route.get("timeframe", ""),
+        }
+    return formatted_routes
+    
+def format_extra_routes_to_dict(routes):
+    formatted_routes = {"extra_routes": {}}
+    for index, route in enumerate(routes):
+        formatted_routes["extra_routes"][index] = {
+            "exchange": route.get("exchange", ""),
+            "symbol": route.get("symbol", ""),
+            "timeframe": route.get("timeframe", ""),
+        }
+    return formatted_routes
     
 cfg = {}
 def run(
@@ -271,8 +291,9 @@ def run(
     if not db_exists:
         create_db()
 
+    dates_list = divide_date_range(start_date,finish_date)
     #cfg = get_config()
-
+    print(n_trials)
     global cfg 
     from jesse.services.env import ENV_VALUES as _cfg_
     cfg = {
@@ -303,15 +324,15 @@ def run(
         "n_trials": n_trials,
         "optimal-total": optimal_total,
         "optimizer": optimizer,
-        "Interval_end": '2023-09-01',
-        "Interval_start": '2018-01-01',
+        "Interval_end": finish_date,
+        "Interval_start": start_date,
         "timespan-testing": {
-            "finish_date": finish_date, 
-            "start_date": start_date,
+            "finish_date": dates_list[3], 
+            "start_date": dates_list[2],
             },
         "timespan-train": {
-            "finish_date": finish_date, 
-            "start_date": start_date,
+            "finish_date": dates_list[1], 
+            "start_date": dates_list[0],
             },
         }
         # Optimizer-specific settings
@@ -363,20 +384,26 @@ def run(
     # Additional settings based on multivariate mode
     if isMultivariate:
         cfg["secondObjectiveDirection"] = secondObjectiveDirection
-
+        cfg['dual_mode'] = secondObjectiveDirection
+        cfg['mode'] = 'multi'
+    else:
+        cfg['mode'] = 'single'
     
     
     
     
     
-    
-    
-    from jesse.services.env import ENV_VALUES as cfg_
+    routes_dict = format_routes_to_dict(routes)
+    cfg.update(routes_dict)
+    if extra_routes != {}:
+        extra_routes_dict = format_extra_routes_to_dict(extra_routes)
+        cfg.update(extra_routes_dict)
+        
     start_date = cfg['timespan-train']['start_date']
-    finish_date = cfg['timespan-train']['finish_date']
+    finish_date = cfg['timespan-testing']['finish_date']
     # {cfg['optimizer']}-{len(cfg['route'].items())} Pairs
     study_name = f"{routes[0]['strategy']}-{routes[0]['exchange']}-{routes[0]['symbol']}-{routes[0]['timeframe']}-{start_date}-{finish_date}"
-    storage = f"postgresql://jesse_user:{cfg_['POSTGRES_PASSWORD']}@{cfg_['POSTGRES_HOST']}:{cfg_['POSTGRES_PORT']}/optuna_db"
+    storage = f"postgresql://jesse_user:{_cfg_['POSTGRES_PASSWORD']}@{_cfg_['POSTGRES_HOST']}:{_cfg_['POSTGRES_PORT']}/optuna_db"
     #pruners defined with optimizer
     defined_pruner = None
     if cfg['optimizer'] == 'GridSampler': 
@@ -403,16 +430,12 @@ def run(
     optuna.logging.set_verbosity(10)
     optuna.logging.enable_propagation()
     optuna.logging.enable_default_handler()
-    c = ['optuna-dashboard','postgresql://jesse_user:optuna_password@localhost/optuna_db']
+    formatted_string = f"postgresql://jesse_user:{_cfg_['POSTGRES_PASSWORD']}@{_cfg_['POSTGRES_HOST']}/optuna_db"
+    c = ['optuna-dashboard',formatted_string, '--port', '8081']
     handle = subprocess.Popen(c, stdin=PIPE, stderr=PIPE, stdout=PIPE, shell=False)
-    if click.confirm(Fore.GREEN + Style.BRIGHT +'Multi-objective optimization search?', default=True):
-        mode = 'multi'
-    else:  
-        mode = 'single'  
-    cfg['mode'] = mode
-    with open(pathlib.Path('optuna_config.yml'), "w") as f:
-        yaml.dump(cfg, f)
-    if click.confirm(Fore.GREEN + Style.BRIGHT + 'Resume previous study?' +  Style.RESET_ALL, default=True):
+
+
+    if continueExistingStudy:
         if cfg['mode'] == 'multi':
             study_name = f'{study_name}-multi'
             if cfg['dual_mode'] == 'maximize':
@@ -426,38 +449,32 @@ def run(
             study_name = f'{study_name}-single'
             study = JoblibStudy(study_name=study_name, direction="maximize", sampler=sampler,
                         storage=storage, load_if_exists=True,pruner=defined_pruner)
-    elif click.confirm(Fore.GREEN +'Delete study with same name and start new?' +  Style.RESET_ALL, default=False):
-        if click.confirm(Fore.RED +'Are you sure?' +  Style.RESET_ALL, default=False):
-            if cfg['mode'] == 'multi':
-                study_name = f'{study_name}-multi'
-                try:
-                    optuna.study.delete_study(study_name=study_name, storage=storage)
-                except Exception as e:
-                    print(e)
-                    pass
-                if cfg['dual_mode'] == 'maximize':
-                    study = JoblibStudy(study_name=study_name, directions=["maximize", "maximize"], sampler=sampler,
-                                storage=storage, load_if_exists=False,pruner=defined_pruner)
-                else:
-                    study = JoblibStudy(study_name=study_name, directions=["maximize", "minimize"], sampler=sampler,
-                                storage=storage, load_if_exists=False,pruner=defined_pruner)
-            else:   
-                study_name = f'{study_name}-single'
-                try:
-                    optuna.study.delete_study(study_name=study_name, storage=storage)
-                except Exception as e:
-                    print(e)
-                    pass
-                study = JoblibStudy(study_name=study_name, direction="maximize", sampler=sampler,
-                                            storage=storage, load_if_exists=False,pruner=defined_pruner)                            
-        else:
-            print("Exiting.")
-            exit(1)
     else:
-        print("Exiting.")
-        exit(1)
-        
-    url = 'http://127.0.0.1:8080/'  
+        if cfg['mode'] == 'multi':
+            study_name = f'{study_name}-multi'
+            try:
+                optuna.study.delete_study(study_name=study_name, storage=storage)
+            except Exception as e:
+                print(e)
+                pass
+            if cfg['dual_mode'] == 'maximize':
+                study = JoblibStudy(study_name=study_name, directions=["maximize", "maximize"], sampler=sampler,
+                            storage=storage, load_if_exists=False,pruner=defined_pruner)
+            else:
+                study = JoblibStudy(study_name=study_name, directions=["maximize", "minimize"], sampler=sampler,
+                            storage=storage, load_if_exists=False,pruner=defined_pruner)
+        else:   
+            study_name = f'{study_name}-single'
+            try:
+                optuna.study.delete_study(study_name=study_name, storage=storage)
+            except Exception as e:
+                print(e)
+                pass
+            study = JoblibStudy(study_name=study_name, direction="maximize", sampler=sampler,
+                                        storage=storage, load_if_exists=False,pruner=defined_pruner)                            
+
+
+    url = 'http://127.0.0.1:8081/'  
     webbrowser.open_new_tab(url)  
     study.set_user_attr("strategy_name", cfg['strategy_name'])
     study.set_user_attr("exchange", cfg['route'][0]['exchange'])
@@ -467,7 +484,7 @@ def run(
     study.set_user_attr("timespan_testing", cfg['timespan-testing']['start_date'] + " -> " + cfg['timespan-testing']['finish_date'])
 
     study.optimize(objective, n_jobs=cfg['n_jobs'], n_trials=cfg['n_trials'])
-    analysis(study)
+    #analysis(study)
     
 @cli.command()
 def analyze()-> None:
@@ -1434,6 +1451,8 @@ def openpyxl_formating(df,base_filename,trial_num,cfg):
     letter2 = get_column_letter(column_count+1)
     letter3 = get_column_letter(column_count+13)
     
+    series_name = extract_specific_part(base_filename)
+    
     chart1 = LineChart()
     chart1.height=10
     chart1.width=20
@@ -1449,9 +1468,15 @@ def openpyxl_formating(df,base_filename,trial_num,cfg):
     chart1.set_categories(dates)
     s1 = chart1.series[0]
     s1.marker.symbol = "diamond"
+    if len(chart1.series) > 0:
+        chart1.series[0].graphicalProperties.line.solidFill = "00AAAA"  
+        chart1.series[0].title = series_name
     # chart1.dataLabels = DataLabelList()
     # chart1.dataLabels.showVal = True
+    
     ws.add_chart(chart1, f"{letter2}4")
+    
+    series_name2 = extract_desired_part_no_time(base_filename)
     
     chart2 = BarChart()
     chart2.type = "bar"
@@ -1468,6 +1493,9 @@ def openpyxl_formating(df,base_filename,trial_num,cfg):
     set_chart_title_size(chart2,size=1400)
     chart2.add_data(chart2_data, titles_from_data=False)
     chart2.set_categories(dates)
+    if len(chart2.series) > 0:
+        chart2.series[0].graphicalProperties.line.solidFill = "00AAAA"  
+        chart2.series[0].title = series_name2
     # s2 = chart2.series[0]
     # s2.marker.symbol = "diamond"
     # chart2.dataLabels = DataLabelList()
@@ -1489,11 +1517,16 @@ def openpyxl_formating(df,base_filename,trial_num,cfg):
     set_chart_title_size(chart3,size=1400)
     chart3.add_data(chart3_data, titles_from_data=False)
     chart3.set_categories(dates)
+    if len(chart3.series) > 0:
+        chart3.series[0].graphicalProperties.line.solidFill = "00AAAA"  
+        chart3.series[0].title = series_name
     # s2 = chart2.series[0]
     # s2.marker.symbol = "diamond"
     # chart2.dataLabels = DataLabelList()
     # chart2.dataLabels.showVal = True
     ws.add_chart(chart3, f"{letter3}4")
+    
+    series_name3 = extract_specific_part_simple(base_filename)
     
     chart4 = BarChart()
     chart4.type = "bar"
@@ -1510,6 +1543,9 @@ def openpyxl_formating(df,base_filename,trial_num,cfg):
     set_chart_title_size(chart4,size=1400)
     chart4.add_data(chart4_data, titles_from_data=False)
     chart4.set_categories(dates)
+    if len(chart4.series) > 0:
+        chart4.series[0].graphicalProperties.line.solidFill = "00AAAA"  
+        chart4.series[0].title = series_name3
     # s2 = chart2.series[0]
     # s2.marker.symbol = "diamond"
     # chart2.dataLabels = DataLabelList()
@@ -1533,6 +1569,31 @@ def set_chart_title_size(chart, size=1400):
     for para in chart.title.tx.rich.paragraphs:
         para.pPr=paraprops 
         
+def extract_desired_part_no_time(filename):
+    try:
+        parts = filename.split('final-trial')
+        if len(parts) > 1:
+            interval_part = parts[1].split('-interval')
+            if len(interval_part) > 0:
+                subparts = interval_part[0].split('-')
+                desired_part = '-'.join(subparts[2:-4]) + '-' + '-'.join(subparts[-3:])
+                return desired_part
+    except:
+        return "Series1"
+
+def extract_specific_part_simple(filename):
+    try:
+        parts = filename.split('final-trial')
+        if len(parts) > 1:
+            interval_part = parts[1].split('-interval')
+            if len(interval_part) > 0:
+                subparts = interval_part[0].split('-')
+                desired_part = subparts[2] + '-' + '-'.join(subparts[-3:])
+                return desired_part
+
+    except:
+        return "Series1"
+    
 def holding_time_shade(value,sorted_df,trial_num):
     try:
         sorted_df.sort()
@@ -1765,6 +1826,16 @@ def multiple_timeframes_func(dir1, output_df, cfg, index, sorted_candidate_trial
         print(e)
         pass
 
+def extract_specific_part(filename):
+    try: 
+        parts = filename.split('final-trial')
+        if len(parts) > 1:
+            interval_part = parts[1].split('-interval')
+            if len(interval_part) > 0:
+                desired_part = interval_part[0].strip('-')
+                return desired_part
+    except:
+        return "Series1"
             
 def random_params_func(dir1,output_df,full_metrics_dict,cfg,index):
     robust_length = cfg['robust_test_iteration_count']
