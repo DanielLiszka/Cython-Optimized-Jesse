@@ -1,11 +1,14 @@
 import warnings
 warnings.filterwarnings('ignore')
-
+from timeloop import Timeloop
+from datetime import timedelta
 import logging
 import os
+from jesse import exceptions
 isfile = os.path.isfile
 join = os.path.join
 from alive_progress import alive_bar, config_handler
+
 from random import randint
 import pathlib
 import matplotlib.pyplot as plt
@@ -29,8 +32,10 @@ import numpy as np
 import optuna
 import pkg_resources
 import yaml
+import joblib
+import copy
 from jesse.research import backtest, get_candles
-from .JoblilbStudy import JoblibStudy
+#from .JoblilbStudy import JoblibStudy
 from subprocess import * 
 import pandas as pd 
 import datetime
@@ -64,7 +69,9 @@ from openpyxl.drawing.text import (
 )
 from openpyxl.drawing.image import Image
 from openpyxl.utils.cell import coordinate_from_string, get_column_letter
-
+from jesse.services.redis import process_status, sync_publish
+from jesse.services.failure import register_custom_exception_handler
+import signal
 # import matplotlib
 # matplotlib.use("svg")
 # import matplotlib.pyplot as plt 
@@ -72,6 +79,59 @@ from openpyxl.utils.cell import coordinate_from_string, get_column_letter
 #Dashboard Command
 # optuna-dashboard postgresql://jesse_user:optuna_password@localhost/optuna_db
 
+joblib_study_finished_event = threading.Event()
+
+class JoblibStudy:
+    def __init__(self, **study_parameters):
+        self.study_parameters = study_parameters
+        self.study: optuna.study.Study = optuna.create_study(**study_parameters)
+        self.finished = False
+        
+    def _optimize_study(self, func, n_trials, **optimize_parameters):
+        study_parameters = copy.copy(self.study_parameters)
+        study_parameters["study_name"] = self.study.study_name
+        study_parameters["load_if_exists"] = True
+        study = optuna.create_study(**study_parameters)
+        study.sampler.reseed_rng()
+        study.optimize(func, n_trials=n_trials, catch=(Exception,), gc_after_trial=True, **optimize_parameters)
+
+    @staticmethod
+    def _split_trials(n_trials, n_jobs):
+        n_per_job, remaining = divmod(n_trials, n_jobs)
+        for _ in range(n_jobs):
+            yield n_per_job + (1 if remaining > 0 else 0)
+            remaining -= 1
+            
+    def optimize(self, func, n_trials=1, n_jobs=-1, **optimize_parameters):
+        if n_jobs == -1:
+            n_jobs = joblib.cpu_count()
+
+        if n_jobs == 1:
+            self.study.optimize(func, n_trials=n_trials, gc_after_trial=True, **optimize_parameters)
+        else:
+            with joblib.Parallel(n_jobs, backend='loky', verbose=10, max_nbytes=None) as parallel:
+                parallel(joblib.delayed(self._optimize_study)(func, n_trials=n_trials_i, **optimize_parameters)
+                         for n_trials_i in self._split_trials(n_trials, n_jobs))
+            joblib_study_finished_event.set()
+            print('Optimization finished')
+            self.finished = True
+            
+    def set_user_attr(self, key: str, value):
+        if isinstance(value, np.integer):
+            value = int(value)
+        elif isinstance(value, np.floating):
+            value = float(value)
+        elif isinstance(value, np.ndarray):
+            value = value.tolist()
+        self.study.set_user_attr(key, value)
+
+    def __getattr__(self, name):
+        if not name.startswith("_") and hasattr(self.study, name):
+            return getattr(self.study, name)
+        else:
+            raise AttributeError(f"'{self.__class__.__name__}' object has no attribute '{name}'")
+            
+            
 logger = logging.getLogger()
 logger.addHandler(logging.FileHandler("jesse-optuna.log", mode="w"))
 
@@ -81,11 +141,6 @@ from joblib import Memory
 cachedir = './temp_cache/'
 memory = Memory(cachedir, verbose=0)
 
-# create a Click group
-@click.group()
-@click.version_option(pkg_resources.get_distribution("jesse-optuna").version)
-def cli() -> None:
-    pass
 
 def clear_cache() -> None: 
     memory.clear(warn=False)
@@ -134,7 +189,6 @@ def clear_database() -> None:
             conn.close()
             
 
-@cli.command()
 def create_config() -> None:
     validate_cwd()
     target_dirname = pathlib.Path().resolve()
@@ -164,6 +218,7 @@ def create_db() -> None:
     conn.close()
 
 def check_study_exists(study_name):
+    import psycopg2
     try:
         from jesse.services.env import ENV_VALUES as cfg_
         db_name = 'optuna_db'
@@ -186,7 +241,24 @@ def check_study_exists(study_name):
 
         return exists
 
-    except (Exception) as error:
+    except Exception as error:
+        print(f"An error occurred: {error}")
+        try:
+            conn = psycopg2.connect(dbname=db_name, user=user, password=password, host=host, port=port)
+            cur = conn.cursor()
+            cur.execute("SELECT study_name FROM studies")
+            all_studies = cur.fetchall()
+            print("All study names in the database:")
+            for study in all_studies:
+                print(study[0])
+
+            cur.close()
+        except Exception as inner_error:
+            print(f"Failed to fetch study names: {inner_error}")
+        finally:
+            if conn:
+                conn.close()
+
         return False
         
 def database_exists():
@@ -255,8 +327,30 @@ def format_extra_routes_to_dict(routes):
             "timeframe": route.get("timeframe", ""),
         }
     return formatted_routes
+
+def is_port_in_use(port):
+    import socket 
+    import subprocess
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        return s.connect_ex(('localhost', port)) == 0
+        
+def reset_termination_signal():
+    termination_file = "termination_signal.txt"
+    if os.path.exists(termination_file):
+        os.remove(termination_file)
+        
+def signal_handler(signum, frame):
+    reset_termination_signal()
+    sys.exit(1)
+
+signal.signal(signal.SIGINT, signal_handler)
+signal.signal(signal.SIGTERM, signal_handler)
+    
+def set_termination_signal():
+    open("termination_signal.txt", "w").close()
     
 cfg = {}
+
 def run(
         continueExistingStudy: bool,
         debug_mode: bool, 
@@ -287,15 +381,30 @@ def run(
         n_trials: int):
         
     validate_cwd()
+    reset_termination_signal()
     db_exists = database_exists()
     if not db_exists:
         create_db()
+        
+    import jesse.helpers as jh
+    from jesse.store import store 
+    
+    status_checker = Timeloop()
+    @status_checker.job(interval=timedelta(seconds=1))
+    def handle_time():
+        if process_status() != 'started':
+            set_termination_signal()
+            joblib_study_finished_event.wait(100)
+            raise exceptions.Termination
+            
+    status_checker.start()
+    register_custom_exception_handler('optuna')
+    store.app.set_session_id()
+        
+    dates_list = divide_date_range(start_date,finish_date) 
 
-    dates_list = divide_date_range(start_date,finish_date)
-    #cfg = get_config()
-    print(n_trials)
-    global cfg 
     from jesse.services.env import ENV_VALUES as _cfg_
+    global cfg
     cfg = {
         "debug_mode": debug_mode,
         "type": config['exchange']['type'],
@@ -316,7 +425,7 @@ def run(
         "fee": config['exchange']['fee'],
         "fitness-ratio1": fitnessMetric1,
         "fitness-ratio2": fitnessMetric2,
-        "futures_leverage": config['exchange']['futures_leverage_mode'],
+        "futures_leverage": config['exchange']['futures_leverage'],
         "futures_leverage_mode": config['exchange']['futures_leverage_mode'],
         "max_final_number_of_validation_results": 64,
         "mode": isMultivariate,
@@ -389,16 +498,11 @@ def run(
     else:
         cfg['mode'] = 'single'
     
-    
-    
-    
-    
     routes_dict = format_routes_to_dict(routes)
     cfg.update(routes_dict)
     if extra_routes != {}:
         extra_routes_dict = format_extra_routes_to_dict(extra_routes)
         cfg.update(extra_routes_dict)
-        
     start_date = cfg['timespan-train']['start_date']
     finish_date = cfg['timespan-testing']['finish_date']
     # {cfg['optimizer']}-{len(cfg['route'].items())} Pairs
@@ -431,9 +535,16 @@ def run(
     optuna.logging.enable_propagation()
     optuna.logging.enable_default_handler()
     formatted_string = f"postgresql://jesse_user:{_cfg_['POSTGRES_PASSWORD']}@{_cfg_['POSTGRES_HOST']}/optuna_db"
-    c = ['optuna-dashboard',formatted_string, '--port', '8081']
-    handle = subprocess.Popen(c, stdin=PIPE, stderr=PIPE, stdout=PIPE, shell=False)
+    port = 8081
 
+    if not is_port_in_use(port):
+        c = ['optuna-dashboard', formatted_string, '--port', str(port)]
+        handle = subprocess.Popen(c, stdin=subprocess.PIPE, stderr=subprocess.PIPE, stdout=subprocess.PIPE, shell=False)
+        url = f'http://127.0.0.1:8081/'  
+        webbrowser.open_new_tab(url)  
+        print("Optuna dashboard started.")
+    else:
+        print("Optuna dashboard is already running.")
 
     if continueExistingStudy:
         if cfg['mode'] == 'multi':
@@ -474,8 +585,7 @@ def run(
                                         storage=storage, load_if_exists=False,pruner=defined_pruner)                            
 
 
-    url = 'http://127.0.0.1:8081/'  
-    webbrowser.open_new_tab(url)  
+
     study.set_user_attr("strategy_name", cfg['strategy_name'])
     study.set_user_attr("exchange", cfg['route'][0]['exchange'])
     study.set_user_attr("symbol", cfg['route'][0]['symbol'])
@@ -483,10 +593,11 @@ def run(
     study.set_user_attr("timespan_train", cfg['timespan-train']['start_date'] + " -> " + cfg['timespan-train']['finish_date'])
     study.set_user_attr("timespan_testing", cfg['timespan-testing']['start_date'] + " -> " + cfg['timespan-testing']['finish_date'])
 
+    write_dict_to_yaml(cfg)
     study.optimize(objective, n_jobs=cfg['n_jobs'], n_trials=cfg['n_trials'])
     #analysis(study)
     
-@cli.command()
+    
 def analyze()-> None:
     validate_cwd()
     cfg = get_config()
@@ -563,9 +674,7 @@ def analysis(study,save_time=False):
     update_full = False
     update_filt = False
     done = False
-    t = threading.Thread(target=animate)
-    t.daemon = True
-    t.start()
+
     # study_summaries = optuna.study_get_all_study_summaries(storage=storage)
     # try:
     #Trail sorting assuming ['maximize']['maximize'] or ['maximize'] directions.
@@ -2326,9 +2435,18 @@ def get_config():
 
     return cfg
 
-def objective(trial):
-    cfg = get_config()
+def write_dict_to_yaml(input_dict, filename="optuna_config.yml"):
+    with open(filename, 'w') as file:
+        yaml.dump(input_dict, file, default_flow_style=False)
 
+def _check_termination():
+    return os.path.exists("termination_signal.txt")
+        
+def objective(trial):
+    if _check_termination():
+        trial.study.stop()
+
+    cfg = get_config()
     StrategyClass = jh.get_strategy_class(cfg['strategy_name'])
     hp_dict = StrategyClass().hyperparameters()
 
@@ -2373,7 +2491,6 @@ def objective(trial):
         trial.set_user_attr("constraint", (constraints_violation1,constraints_violation2))
     # print(constraints_violation1)
     # print(constraints_violation2)
-    
 
 
     if training_data_metrics['total'] <= cfg['optimal-total']:
@@ -2382,36 +2499,36 @@ def objective(trial):
     total_effect_rate = np.log10(training_data_metrics['total']) / np.log10(cfg['optimal-total'])
     total_effect_rate = min(total_effect_rate, 1)
     ratio_config = cfg['fitness-ratio1']
-    if ratio_config == 'sharpe':
+    if ratio_config == 'Sharpe':
         ratio = training_data_metrics['sharpe_ratio']
         ratio_normalized = jh.normalize(ratio, -.5, 5)
-    elif ratio_config == 'calmar':
+    elif ratio_config == 'Calmar':
         ratio = training_data_metrics['calmar_ratio']
         ratio_normalized = jh.normalize(ratio, -.5, 30)
-    elif ratio_config == 'sortino':
+    elif ratio_config == 'Sortino':
         ratio = training_data_metrics['sortino_ratio']
         ratio_normalized = jh.normalize(ratio, -.5, 15)
-    elif ratio_config == 'omega':
+    elif ratio_config == 'Omega':
         ratio = training_data_metrics['omega_ratio']
         ratio_normalized = jh.normalize(ratio, -.5, 5)
-    elif ratio_config == 'serenity':
+    elif ratio_config == 'Serenity':
         ratio = training_data_metrics['serenity_index']
         ratio_normalized = jh.normalize(ratio, -.5, 15)
-    elif ratio_config == 'smart sharpe':
+    elif ratio_config == 'SmartSharpe':
         ratio = training_data_metrics['smart_sharpe']
         ratio_normalized = jh.normalize(ratio, -.5, 5)
-    elif ratio_config == 'smart sortino':
+    elif ratio_config == 'SmartSortino':
         ratio = training_data_metrics['smart_sortino']
         ratio_normalized = jh.normalize(ratio, -.5, 15)
-    elif ratio_config == 'max drawdown':
+    elif ratio_config == 'MaxDrawdown':
         ratio = training_data_metrics['max_drawdown']
         ratio_normalized = ratio 
-    elif ratio_config == 'gross_loss':
+    elif ratio_config == 'GrossLoss':
         ratio = training_data_metrics['gross_loss']
         ratio_normalized = ratio
     else:
         raise ValueError(
-            f'The entered ratio configuration `{ratio_config}` for the optimization is unknown. Choose between sharpe, calmar, sortino, serenity, smart sharpe, smart sortino and omega.')
+            f'The entered ratio configuration `{ratio_config}` for the optimization is unknown. Choose between Sharpe, Calmar, Sortino, Serenity, SmartSharpe, SmartSortino and Omega.')
     if ratio < 0:
         raise optuna.TrialPruned
 
@@ -2420,36 +2537,36 @@ def objective(trial):
     
     if cfg['mode'] == 'multi':
         ratio_config2 = cfg['fitness-ratio2']
-        if ratio_config2 == 'sharpe':
+        if ratio_config2 == 'Sharpe':
             ratio2 = training_data_metrics['sharpe_ratio']
             ratio_normalized2 = jh.normalize(ratio2, -.5, 5)
-        elif ratio_config2 == 'calmar':
+        elif ratio_config2 == 'Calmar':
             ratio2 = training_data_metrics['calmar_ratio']
             ratio_normalized2 = jh.normalize(ratio2, -.5, 30)
-        elif ratio_config2 == 'sortino':
+        elif ratio_config2 == 'Sortino':
             ratio2 = training_data_metrics['sortino_ratio']
             ratio_normalized2 = jh.normalize(ratio2, -.5, 15)
-        elif ratio_config2 == 'omega':
+        elif ratio_config2 == 'Omega':
             ratio2 = training_data_metrics['omega_ratio']
             ratio_normalized2 = jh.normalize(ratio2, -.5, 5)
-        elif ratio_config2 == 'serenity':
+        elif ratio_config2 == 'Serenity':
             ratio2 = training_data_metrics['serenity_index']
             ratio_normalized2 = jh.normalize(ratio2, -.5, 15)
-        elif ratio_config2 == 'smart sharpe':
+        elif ratio_config2 == 'SmartSharpe':
             ratio2 = training_data_metrics['smart_sharpe']
             ratio_normalized2 = jh.normalize(ratio2, -.5, 5)
-        elif ratio_config2 == 'smart sortino':
+        elif ratio_config2 == 'SmartSortino':
             ratio2 = training_data_metrics['smart_sortino']
             ratio_normalized2 = jh.normalize(ratio2, -.5, 15)
-        elif ratio_config2 == 'max drawdown':
+        elif ratio_config2 == 'MaxDrawdown':
             ratio2 = training_data_metrics['max_drawdown']
             ratio_normalized2 = ratio2
-        elif ratio_config2 == 'gross loss':
+        elif ratio_config2 == 'GrossLoss':
             ratio2 = training_data_metrics['gross_loss']
             ratio_normalized2 = ratio2
         else:
             raise ValueError(
-                f'The entered ratio2 configuration `{ratio_config2}` for the optimization is unknown. Choose between sharpe, calmar, sortino, serenity, smart shapre, smart sortino and omega.')
+                f'The entered ratio2 configuration `{ratio_config2}` for the optimization is unknown. Choose between Sharpe, Calmar, Sortino, Serenity, smart shapre, SmartSortino and Omega.')
         if ratio2 < 0 and cfg['dual_mode'] == 'maximize':
             raise optuna.TrialPruned()
         score2 = total_effect_rate * ratio_normalized2
@@ -2477,36 +2594,36 @@ def objective(trial):
     testing_total_effect_rate = min(testing_total_effect_rate, 1) 
     
     ratio_config = cfg['fitness-ratio1']
-    if ratio_config == 'sharpe':
+    if ratio_config == 'Sharpe':
         testing_ratio = testing_data_metrics['sharpe_ratio']
         testing_ratio_normalized = jh.normalize(testing_ratio, -.5, 5)
-    elif ratio_config == 'calmar':
+    elif ratio_config == 'Calmar':
         testing_ratio = testing_data_metrics['calmar_ratio']
         testing_ratio_normalized = jh.normalize(testing_ratio, -.5, 30)
-    elif ratio_config == 'sortino':
+    elif ratio_config == 'Sortino':
         testing_ratio = testing_data_metrics['sortino_ratio']
         testing_ratio_normalized = jh.normalize(testing_ratio, -.5, 15)
-    elif ratio_config == 'omega':
+    elif ratio_config == 'Omega':
         testing_ratio = testing_data_metrics['omega_ratio']
         testing_ratio_normalized = jh.normalize(testing_ratio, -.5, 5)
-    elif ratio_config == 'serenity':
+    elif ratio_config == 'Serenity':
         testing_ratio = testing_data_metrics['serenity_index']
         testing_ratio_normalized = jh.normalize(testing_ratio, -.5, 15)
-    elif ratio_config == 'smart sharpe':
+    elif ratio_config == 'SmartSharpe':
         testing_ratio = testing_data_metrics['smart_sharpe']
         testing_ratio_normalized = jh.normalize(testing_ratio, -.5, 5)
-    elif ratio_config == 'smart sortino':
+    elif ratio_config == 'SmartSortino':
         testing_ratio = testing_data_metrics['smart_sortino']
         testing_ratio_normalized = jh.normalize(testing_ratio, -.5, 15)
-    elif ratio_config == 'max drawdown':
+    elif ratio_config == 'MaxDrawdown':
         testing_ratio = testing_data_metrics['max_drawdown']
         testing_ratio_normalized = testing_ratio
-    elif ratio_config == 'gross loss':
+    elif ratio_config == 'GrossLoss':
         testing_ratio = testing_data_metrics['gross_loss']
         testing_ratio_normalized = testing_ratio
     else:
         raise ValueError(
-            f'The entered ratio configuration `{ratio_config}` for the optimization is unknown. Choose between sharpe, calmar, sortino, serenity, smart shapre, smart sortino and omega.')
+            f'The entered ratio configuration `{ratio_config}` for the optimization is unknown. Choose between Sharpe, Calmar, Sortino, Serenity, smart shapre, SmartSortino and Omega.')
     testing_score = testing_total_effect_rate * testing_ratio_normalized
     trial.set_user_attr(f"testing_score_1", testing_score)   
     
@@ -2515,36 +2632,36 @@ def objective(trial):
         
     if cfg['mode'] == 'multi':
         ratio_config2 = cfg['fitness-ratio2']
-        if ratio_config2 == 'sharpe':
+        if ratio_config2 == 'Sharpe':
             testing_ratio2 = testing_data_metrics['sharpe_ratio']
             testing_ratio_normalized2 = jh.normalize(testing_ratio2, -.5, 5)
-        elif ratio_config2 == 'calmar':
+        elif ratio_config2 == 'Calmar':
             testing_ratio2 = testing_data_metrics['calmar_ratio']
             testing_ratio_normalized2 = jh.normalize(testing_ratio2, -.5, 30)
-        elif ratio_config2 == 'sortino':
+        elif ratio_config2 == 'Sortino':
             testing_ratio2 = testing_data_metrics['sortino_ratio']
             testing_ratio_normalized2 = jh.normalize(testing_ratio2, -.5, 15)
-        elif ratio_config2 == 'omega':
+        elif ratio_config2 == 'Omega':
             testing_ratio2 = testing_data_metrics['omega_ratio']
             testing_ratio_normalized2 = jh.normalize(testing_ratio2, -.5, 5)
-        elif ratio_config2 == 'serenity':
+        elif ratio_config2 == 'Serenity':
             testing_ratio2 = testing_data_metrics['serenity_index']
             testing_ratio_normalized2 = jh.normalize(testing_ratio2, -.5, 15)
-        elif ratio_config2 == 'smart sharpe':
+        elif ratio_config2 == 'SmartSharpe':
             testing_ratio2 = testing_data_metrics['smart_sharpe']
             testing_ratio_normalized2 = jh.normalize(testing_ratio2, -.5, 5)
-        elif ratio_config2 == 'smart sortino':
+        elif ratio_config2 == 'SmartSortino':
             testing_ratio2 = testing_data_metrics['smart_sortino']
             testing_ratio_normalized2 = jh.normalize(testing_ratio2, -.5, 15)
-        elif ratio_config2 == 'max drawdown':
+        elif ratio_config2 == 'MaxDrawdown':
             testing_ratio2 = testing_data_metrics['max_drawdown']
             testing_ratio_normalized2 = testing_ratio2
-        elif ratio_config2 == 'gross loss':
+        elif ratio_config2 == 'GrossLoss':
             testing_ratio2 = testing_data_metrics['gross_loss']
             testing_ratio_normalized2 = testing_ratio2
         else:
             raise ValueError(
-                f'The entered ratio2 configuration `{ratio_config2}` for the optimization is unknown. Choose between sharpe, calmar, sortino, serenity, smart shapre, smart sortino and omega.')
+                f'The entered ratio2 configuration `{ratio_config2}` for the optimization is unknown. Choose between Sharpe, Calmar, Sortino, Serenity, smart shapre, SmartSortino and Omega.')
         if testing_ratio_normalized2 < (-(ratio_normalized2/5)) and cfg['dual_mode'] == 'maximize':
             raise optuna.TrialPruned()
         testing_score_2 = testing_total_effect_rate * testing_ratio_normalized2
@@ -2575,9 +2692,9 @@ def objective(trial):
         os.makedirs(f"{train_temp_path}{train_path}")
     if not os.path.exists(f"{test_temp_path}{test_path}"):
         os.makedirs(f"{test_temp_path}{test_path}")
-    
-    training_results_df.to_csv(f"{train_temp_path}{train_path}/{round(training_data_metrics['smart_sharpe'],3)} sharpie -training: {trial.number}-{cfg['strategy_name']}.csv", header=True, index=False, encoding='utf-8', sep=',')
-    testing_results_df.to_csv(f"{test_temp_path}{test_path}/{round(testing_data_metrics['smart_sharpe'],3)} sharpie -testing: {trial.number}-{cfg['strategy_name']}.csv", header=True, index=False, encoding='utf-8', sep=',')
+    if cfg['debug_mode']:
+        training_results_df.to_csv(f"{train_temp_path}{train_path}/{round(training_data_metrics['smart_sharpe'],3)} sharpie -training: {trial.number}-{cfg['strategy_name']}.csv", header=True, index=False, encoding='utf-8', sep=',')
+        testing_results_df.to_csv(f"{test_temp_path}{test_path}/{round(testing_data_metrics['smart_sharpe'],3)} sharpie -testing: {trial.number}-{cfg['strategy_name']}.csv", header=True, index=False, encoding='utf-8', sep=',')
     
     if cfg['mode'] == 'single':
         return score
@@ -2770,42 +2887,5 @@ def optuna_backtest_function_quant(start_date, finish_date, hp, cfg, run_silentl
     else:
         return backtest_data['metrics']
     
-def animate():
-    cfg = get_config()
-    text1 = Fore.CYAN + Style.BRIGHT + "Conducting Aanalysis"
-    text2 = Fore.RED + Style.BRIGHT + f" -> Backtesting {cfg['validation_interval']} Day Intervals From {cfg['Interval_start']} To {cfg['Interval_end']}"
-    text_full = Fore.GREEN + Style.BRIGHT + f" -> Backtesting from {cfg['Interval_start']} To {cfg['Interval_end']} to Get Continuous Metrics"
-    text_filt = Fore.WHITE + Style.BRIGHT + f" -> Filtering Trial Results"
-    text3 = Fore.MAGENTA + Style.BRIGHT + f" -> Backtesting {cfg['robust_test_iteration_count']} Robust Parameter Tests"
-    text4 = Fore.GREEN + Style.BRIGHT + f" -> Backtesting Multiple Timeframes"
-    text5 = Fore.WHITE + Style.BRIGHT + f" -> Backtesting Random Symbols" 
-    text6 = Style.RESET_ALL + '\n '
-    text7 = Fore.MAGENTA + Style.BRIGHT + 'Creating QuantStat Reports. Last Step!'
-    text8 = Figlet(font='standard')
-    amount = 99999999999999999
-    config_handler.set_global(title=text1, length = 50, spinner_length=50,theme='scuba',stats=False,monitor=False,enrich_print=True,force_tty=True)
-    with alive_bar(dual_line=True) as bar:
-        for i in range(amount):
-            if update_filt == True:
-                bar.text(text_filt)
-            if update_1 == True:
-                bar.text(text2)
-            if update_2 == True:
-                bar.text(text3)
-            if update_3 == True:
-                bar.text(text4)
-            if update_4 == True:
-                bar.text(text5)
-            if update_full == True:
-                bar.text(text_full)
-            if final_update == True:
-                bar.title(text7)
-            if done:
-                break
-            sleep(0.15)
-            bar()
-    print('\n')
-    print(colored(text8.renderText('Finished!'), 'red'))
-    time.sleep(0.1)
-    sys.stdout.write(text6)
+
     
