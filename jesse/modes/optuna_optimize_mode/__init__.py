@@ -72,6 +72,7 @@ from openpyxl.utils.cell import coordinate_from_string, get_column_letter
 from jesse.services.redis import process_status, sync_publish
 from jesse.services.failure import register_custom_exception_handler
 import signal
+import itertools
 # import matplotlib
 # matplotlib.use("svg")
 # import matplotlib.pyplot as plt 
@@ -85,7 +86,6 @@ class JoblibStudy:
     def __init__(self, **study_parameters):
         self.study_parameters = study_parameters
         self.study: optuna.study.Study = optuna.create_study(**study_parameters)
-        self.finished = False
         
     def _optimize_study(self, func, n_trials, **optimize_parameters):
         study_parameters = copy.copy(self.study_parameters)
@@ -105,16 +105,21 @@ class JoblibStudy:
     def optimize(self, func, n_trials=1, n_jobs=-1, **optimize_parameters):
         if n_jobs == -1:
             n_jobs = joblib.cpu_count()
-
+            joblib_study_finished_event.set()
+            print('Optimization finished')
         if n_jobs == 1:
             self.study.optimize(func, n_trials=n_trials, gc_after_trial=True, **optimize_parameters)
+            joblib_study_finished_event.set()
+            print('Optimization finished')
         else:
             with joblib.Parallel(n_jobs, backend='loky', verbose=10, max_nbytes=None) as parallel:
                 parallel(joblib.delayed(self._optimize_study)(func, n_trials=n_trials_i, **optimize_parameters)
                          for n_trials_i in self._split_trials(n_trials, n_jobs))
-            joblib_study_finished_event.set()
+
             print('Optimization finished')
-            self.finished = True
+            #from joblib.externals.loky import get_reusable_executor
+            #get_reusable_executor().shutdown(wait=True)
+            joblib_study_finished_event.set()
             
     def set_user_attr(self, key: str, value):
         if isinstance(value, np.integer):
@@ -294,6 +299,23 @@ def database_exists():
 
     return exists
     
+def generate_grid(hp):
+    if hp['type'] == int:
+        if 'step' not in hp:
+            hp['step'] = 1
+        return list(range(hp['min'], hp['max'] + 1, hp.get('step', 1)))
+    elif hp['type'] == float:
+        if 'step' not in hp:
+            hp['step'] = 1
+        return [hp['min'] + i * hp.get('step', 0.1) for i in range(int((hp['max'] - hp['min']) / hp.get('step', 0.1)) + 1)]
+    elif hp['type'] == bool:
+        return [True, False]
+    elif hp['type'] == str:
+        return hp['list']
+    else:
+        raise TypeError('Only int, bool, float, and str types are implemented for strategy parameters.')
+
+
 def divide_date_range(start_date, finish_date, ratio=0.85):
     start_date_obj = datetime.strptime(start_date, '%Y-%m-%d')
     finish_date_obj = datetime.strptime(finish_date, '%Y-%m-%d')
@@ -335,7 +357,7 @@ def is_port_in_use(port):
         return s.connect_ex(('localhost', port)) == 0
         
 def reset_termination_signal():
-    termination_file = "termination_signal.txt"
+    termination_file = "./storage/temp/termination_signal.txt"
     if os.path.exists(termination_file):
         os.remove(termination_file)
         
@@ -347,7 +369,7 @@ signal.signal(signal.SIGINT, signal_handler)
 signal.signal(signal.SIGTERM, signal_handler)
     
 def set_termination_signal():
-    open("termination_signal.txt", "w").close()
+    open("./storage/temp/termination_signal.txt", "w").close()
     
 cfg = {}
 
@@ -369,7 +391,6 @@ def run(
         prior_weight: float,
         n_startup_trials: int,
         n_ei_candidates: int,
-        gamma: float,
         group: bool,
         sigma: float,
         consider_pruned_trials: bool,
@@ -428,7 +449,7 @@ def run(
         "futures_leverage": config['exchange']['futures_leverage'],
         "futures_leverage_mode": config['exchange']['futures_leverage_mode'],
         "max_final_number_of_validation_results": 64,
-        "mode": isMultivariate,
+        "multivariate": isMultivariate,
         "n_jobs": config['cpu_cores'],
         "n_trials": n_trials,
         "optimal-total": optimal_total,
@@ -447,11 +468,11 @@ def run(
         # Optimizer-specific settings
     optimizer_settings = {
         'TPESampler': {
+            "multivariate" : isMultivariate,
             "consider_prior": consider_prior,
             "prior_weight": prior_weight,
             "n_startup_trials": n_startup_trials,
             "n_ei_candidates": n_ei_candidates,
-            "gamma": gamma,
             "group": group
         },
         'NSGAIISampler': {
@@ -474,7 +495,6 @@ def run(
             "prior_weight": prior_weight,
             "n_startup_trials": n_startup_trials,
             "n_ei_candidates": n_ei_candidates,
-            "gamma": gamma
         },
         'QMCSampler': {
             "qmc_type": qmc_type,
@@ -511,9 +531,12 @@ def run(
     #pruners defined with optimizer
     defined_pruner = None
     if cfg['optimizer'] == 'GridSampler': 
-        sampler = optuna.samplers.GridSampler()
+        StrategyClass = jh.get_strategy_class(cfg['strategy_name'])
+        hp_dict = StrategyClass().hyperparameters()
+        search_space = {hp['name']: generate_grid(hp) for hp in hp_dict}
+        sampler = optuna.samplers.GridSampler(search_space)
     elif cfg['optimizer'] == 'BruteForceSampler':
-        sampler = optuna.samplers.BrutgeForceSampler()
+        sampler = optuna.samplers.BruteForceSampler()
     elif cfg['optimizer'] == 'QMCSampler':
         sampler = optuna.samplers.QMCSampler(qmc_type=cfg[cfg['optimizer']]['qmc_type'], scramble=cfg[cfg['optimizer']]['scramble'])
     elif cfg['optimizer'] == 'CmaEsSampler':
@@ -521,14 +544,17 @@ def run(
     elif cfg['optimizer'] == 'RandomSampler':
         sampler = optuna.samplers.RandomSampler()
     elif cfg['optimizer'] == 'NSGAIISampler': 
-        sampler = optuna.samplers.NSGAIISampler(population_size=cfg[cfg['optimizer']]['population_size'], mutation_prob=cfg[cfg['optimizer']]['mutation_prob'],
+        sampler = optuna.samplers.NSGAIISampler(population_size=cfg[cfg['optimizer']]['population_size'],
                                                 crossover_prob=cfg[cfg['optimizer']]['crossover_prob'], swapping_prob=cfg[cfg['optimizer']]['swapping_prob']) #,constraints_func=constraints_function)
+    elif cfg['optimizer'] == 'NSGAIIISampler': 
+        sampler = optuna.samplers.NSGAIIISampler(population_size=cfg[cfg['optimizer']]['population_size'],
+                                                crossover_prob=cfg[cfg['optimizer']]['crossover_prob'], swapping_prob=cfg[cfg['optimizer']]['swapping_prob'])
     elif cfg['optimizer'] == 'TPESampler':
-        sampler = optuna.samplers.TPESampler(multivariate=cfg[cfg['optimizer']]['multivariate'], consider_prior= cfg[cfg['optimizer']]['consider_prior'], 
-                                                prior_weight= cfg[cfg['optimizer']]['prior_weight'], group = cfg[cfg['optimizer']]['group'], constraints_func=constraints_function)
+        sampler = optuna.samplers.TPESampler(multivariate=cfg[cfg['optimizer']]['multivariate'], consider_prior= cfg[cfg['optimizer']]['consider_prior'],n_startup_trials=cfg[cfg['optimizer']]['n_startup_trials'], n_ei_candidates=cfg[cfg['optimizer']]['n_ei_candidates'],
+                                                prior_weight= cfg[cfg['optimizer']]['prior_weight'], group = cfg[cfg['optimizer']]['group']) #, constraints_func=constraints_function)
         defined_pruner=optuna.pruners.HyperbandPruner()
     elif cfg['optimizer'] == 'MOTPESampler':
-        sampler = optuna.samplers.MOTPESampler(consider_prior= cfg[cfg['optimizer']]['consider_prior'], prior_weight = cfg[cfg['optimizer']]['prior_weight'],n_ehvi_candidates=cfg[cfg['optimizer']]['n_ehvi_candidates'])
+        sampler = optuna.samplers.MOTPESampler(consider_prior= cfg[cfg['optimizer']]['consider_prior'], prior_weight = cfg[cfg['optimizer']]['prior_weight'],n_startup_trials=cfg[cfg['optimizer']]['n_startup_trials'], n_ehvi_candidates=cfg[cfg['optimizer']]['n_ei_candidates'])
         defined_pruner=optuna.pruners.HyperbandPruner()
         
     optuna.logging.set_verbosity(10)
@@ -2440,7 +2466,7 @@ def write_dict_to_yaml(input_dict, filename="optuna_config.yml"):
         yaml.dump(input_dict, file, default_flow_style=False)
 
 def _check_termination():
-    return os.path.exists("termination_signal.txt")
+    return os.path.exists("./storage/temp/termination_signal.txt")
         
 def objective(trial):
     if _check_termination():
@@ -2450,21 +2476,31 @@ def objective(trial):
     StrategyClass = jh.get_strategy_class(cfg['strategy_name'])
     hp_dict = StrategyClass().hyperparameters()
 
-    for st_hp in hp_dict:
-        if st_hp['type'] is int:
-            if 'step' not in st_hp:
-                st_hp['step'] = 1
-            trial.suggest_int(st_hp['name'], st_hp['min'], st_hp['max'], step=st_hp['step'])
-        elif st_hp['type'] is float:
-            if 'step' not in st_hp:
-                st_hp['step'] = 0.1
-            trial.suggest_float(st_hp['name'], st_hp['min'], st_hp['max'], step=st_hp['step'])
-        elif st_hp['type'] is bool:
-            trial.suggest_categorical(st_hp['name'], [True, False])
-        elif st_hp['type'] is str:
-            trial.suggest_categorical(st_hp['name'], st_hp['list'])
-        else:
-            raise TypeError('Only int, bool and float types are implemented for strategy parameters.')
+    # Define hyperparameters based on the sampler type
+    if cfg['optimizer'] == 'GridSampler':
+        # Just validate the names and types; the values are fixed by the grid
+        for st_hp in hp_dict:
+            if st_hp['type'] is int:
+                trial.suggest_int(st_hp['name'], st_hp['min'], st_hp['max'])
+            elif st_hp['type'] is float:
+                trial.suggest_float(st_hp['name'], st_hp['min'], st_hp['max'])
+            elif st_hp['type'] is bool:
+                trial.suggest_categorical(st_hp['name'], [True, False])
+            elif st_hp['type'] is str:
+                trial.suggest_categorical(st_hp['name'], st_hp['list'])
+    else:
+        # Dynamically suggest values
+        for st_hp in hp_dict:
+            if st_hp['type'] is int:
+                step = st_hp.get('step', 1)
+                trial.suggest_int(st_hp['name'], st_hp['min'], st_hp['max'], step=step)
+            elif st_hp['type'] is float:
+                step = st_hp.get('step', 0.1)
+                trial.suggest_float(st_hp['name'], st_hp['min'], st_hp['max'], step=step)
+            elif st_hp['type'] is bool:
+                trial.suggest_categorical(st_hp['name'], [True, False])
+            elif st_hp['type'] is str:
+                trial.suggest_categorical(st_hp['name'], st_hp['list'])
     
     try:
         training_data_metrics = optuna_backtest_function(cfg['timespan-train']['start_date'],
