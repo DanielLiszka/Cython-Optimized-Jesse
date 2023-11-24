@@ -77,7 +77,7 @@ import itertools
 # import matplotlib.pyplot as plt 
 
 #Dashboard Command
-# optuna-dashboard postgresql://jesse_user:optuna_password@localhost/optuna_db
+# optuna-dashboard postgresql://jesse_user:password@localhost/optuna_db
 
 joblib_study_finished_event = threading.Event()
 
@@ -526,7 +526,7 @@ def run(
     finish_date = cfg['timespan-testing']['finish_date']
     # {cfg['optimizer']}-{len(cfg['route'].items())} Pairs
     study_name = f"{routes[0]['strategy']}-{routes[0]['exchange']}-{routes[0]['symbol']}-{routes[0]['timeframe']}-{start_date}-{finish_date}"
-    storage = f"postgresql://jesse_user:{_cfg_['POSTGRES_PASSWORD']}@{_cfg_['POSTGRES_HOST']}:{_cfg_['POSTGRES_PORT']}/optuna_db"
+    storage = f"postgresql://jesse_user:{cfg['postgres_password']}@{cfg['postgres_host']}:{cfg['postgres_port']}/optuna_db"
     #pruners defined with optimizer
     defined_pruner = None
     if cfg['optimizer'] == 'GridSampler': 
@@ -572,12 +572,12 @@ def run(
     optuna.logging.enable_propagation()
     optuna.logging.enable_default_handler()
     formatted_string = f"postgresql://jesse_user:{_cfg_['POSTGRES_PASSWORD']}@{_cfg_['POSTGRES_HOST']}/optuna_db"
-    port = 8081
+    port = 8082
 
     if not is_port_in_use(port):
         c = ['optuna-dashboard', formatted_string, '--port', str(port)]
         handle = subprocess.Popen(c, stdin=subprocess.PIPE, stderr=subprocess.PIPE, stdout=subprocess.PIPE, shell=False)
-        url = f'http://127.0.0.1:8081/'  
+        url = f'http://127.0.0.1:8082/'  
         webbrowser.open_new_tab(url)  
         print("Optuna dashboard started.")
     else:
@@ -621,8 +621,8 @@ def run(
             study = JoblibStudy(study_name=study_name, direction="maximize", sampler=sampler,
                                         storage=storage, load_if_exists=False,pruner=defined_pruner)                            
 
-    
-    cfg['n_trials_start'] = study.trials[-1].number if study.trials else 1
+    cfg['study_full_name'] = study_name
+    cfg['n_trials_start'] = study.trials[-1].number if study.trials else 0
     cfg['main_pid'] = os.getpid()
     study.set_user_attr("strategy_name", cfg['strategy_name'])
     study.set_user_attr("exchange", cfg['route'][0]['exchange'])
@@ -632,6 +632,7 @@ def run(
     study.set_user_attr("timespan_testing", cfg['timespan-testing']['start_date'] + " -> " + cfg['timespan-testing']['finish_date'])
 
     write_dict_to_yaml(cfg)
+    #df = (study.trials_dataframe())
     study.optimize(objective, n_jobs=cfg['n_jobs'], n_trials=cfg['n_trials'])
     #analysis(study)
     
@@ -715,7 +716,7 @@ def analysis(study,save_time=False):
 
     # study_summaries = optuna.study_get_all_study_summaries(storage=storage)
     # try:
-    #Trail sorting assuming ['maximize']['maximize'] or ['maximize'] directions.
+    #Trial sorting assuming ['maximize']['maximize'] or ['maximize'] directions.
     update_filt = True
     
     trials = study.get_trials()
@@ -2370,7 +2371,7 @@ def metrics_func(best_trial,missing_files,extra_files,cfg,Interval_start,Interva
         final_path = f"{dir1}final-trial:{best_trial.number}-{cfg['strategy_name']}-{cfg['route'][0]['exchange']}-{cfg['route'][0]['symbol']}-{cfg['route'][0]['timeframe']}-interval:{cfg['validation_interval']}-{Interval_start}-{Interval_end}.csv"
         formated = f"final-trial:{best_trial.number}-{cfg['strategy_name']}-{cfg['route'][0]['exchange']}-{cfg['route'][0]['symbol']}-{cfg['route'][0]['timeframe']}-interval:{cfg['validation_interval']}-{Interval_start}-{Interval_end}.xlsx"      
         _formated_final_path = "unknown.csv"
-        # Check to see if the trail number has fully finished and formatted into an .xlsx file. 
+        # Check to see if the trial number has fully finished and formatted into an .xlsx file. 
         for f in os.listdir(dir1):
             if f.endswith(formated):
                 _formated_final_path = f         
@@ -2492,9 +2493,39 @@ def objective(trial):
         trial.study.stop()
 
     cfg = get_config()
-    
+    resumed = False
     StrategyClass = jh.get_strategy_class(cfg['strategy_name'])
     hp_dict = StrategyClass().hyperparameters()
+    fitness_description = f"{cfg['fitness-ratio1']} - {cfg['fitness-ratio2']}" if cfg['mode'] == 'multi' else f"{cfg['fitness-ratio1']}"
+    # load previous trial data
+    if (trial.number - (cfg['n_trials_start']+1) == 0) and trial.number > 50:
+        resumed = True
+        storage = f"postgresql://jesse_user:{cfg['postgres_password']}@{cfg['postgres_host']}:{cfg['postgres_port']}/optuna_db"
+        study_history = optuna.load_study(study_name=cfg['study_full_name'], storage=storage)
+        best_candidates_array = []
+        all_trials =  study_history.get_trials(states=[optuna.trial.TrialState.COMPLETE])
+        if len(all_trials) > 0:
+            for _trial in all_trials:
+                dna_string = jh.hp_to_dna(hp_dict, _trial.params)
+                best_candidate = {
+                    'rank': _trial.number,
+                    'dna': dna_string,
+                    'fitness': round(_trial.user_attrs.get('training_score_1',-1),3) if cfg['mode'] == 'single' else (round(_trial.user_attrs.get('training_score_1',-1),3),round(_trial.user_attrs.get('training_score_2',-1),3)),  
+                    'training_win_rate': int(_trial.user_attrs.get('training-win_rate',-1) * 100),
+                    'training_total_trades': _trial.user_attrs.get('training-total',-1),
+                    'training_pnl': round(_trial.user_attrs.get('training-net_profit_percentage',-1), 2),
+                    'testing_win_rate': int(_trial.user_attrs.get('testing-win_rate',-1) * 100),
+                    'testing_total_trades': _trial.user_attrs.get('testing-total',-1),
+                    'testing_pnl': round(_trial.user_attrs.get('testing-net_profit_percentage',-1),2),
+                    'hyperparameters': _trial.params,
+                    'fitness_description': fitness_description
+                }
+                best_candidates_array.append(best_candidate)
+            sync_publish('best_candidates', best_candidates_array, 'optuna', cfg['main_pid'])
+    # initialize default values if the trial is pruned early.
+    if cfg['optimizer'] in ['NSGAIISampler', 'TPESampler']:
+        default_constraints = (0.5, 0.5)  
+        trial.set_user_attr("constraint", default_constraints)
 
     # Define hyperparameters based on the sampler type
     if cfg['optimizer'] == 'GridSampler':
@@ -2521,7 +2552,7 @@ def objective(trial):
                 trial.suggest_categorical(st_hp['name'], [True, False])
             elif st_hp['type'] is str:
                 trial.suggest_categorical(st_hp['name'], st_hp['list'])
-    
+
     try:
         training_data_metrics = optuna_backtest_function(cfg['timespan-train']['start_date'],
                                                   cfg['timespan-train']['finish_date'],
@@ -2623,11 +2654,11 @@ def objective(trial):
         
     #constraints_violation must be negative to proceed. Only used for NSGAIISampler and TPESampler
     if cfg['optimizer'] in ['NSGAIISampler', 'TPESampler']:
-        constraints_violation1 =  -1*testing_data_metrics['omega_ratio']+0.9
+        constraints_violation1 = (-1*testing_data_metrics['omega_ratio'])+0.85
         constraints_violation2 = -1*testing_data_metrics['kelly_criterion']
         trial.set_user_attr("constraint", (constraints_violation1,constraints_violation2))
-    # print(constraints_violation1)
-    # print(constraints_violation2)
+        # print(constraints_violation1)
+        # print(constraints_violation2)
     
     for key, value in testing_data_metrics.items():
         if isinstance(value, np.integer):
@@ -2724,32 +2755,31 @@ def objective(trial):
         testing_score_2 = testing_total_effect_rate * testing_ratio_normalized2
         trial.set_user_attr(f"testing_score_2", testing_score_2)
      
-
-    
-    training_data_metrics['start_date'] = cfg['timespan-train']['start_date']
-    training_data_metrics['finish_date'] = cfg['timespan-train']['finish_date']
-    training_data_metrics['parameters'] = trial.params
-    pairs = []
-    for i in range(len(cfg['route'].items())):
-        pairs.append(cfg['route'][i]['symbol'])
-    pairs = ','.join(pairs)
-    training_data_metrics['pairs'] = pairs
-    training_results_df = pd.DataFrame.from_dict(training_data_metrics.items(), orient='columns')
-    testing_data_metrics['start_date'] = cfg['timespan-testing']['start_date']
-    testing_data_metrics['finish_date'] = cfg['timespan-testing']['finish_date']
-    testing_data_metrics['parameters'] = trial.params
-    testing_data_metrics['pairs'] = pairs
-    testing_results_df = pd.DataFrame.from_dict(testing_data_metrics.items(), orient='columns')  
-    train_temp_path = f"./storage/jesse-optuna/training_metrics/"
-    test_temp_path = f"./storage/jesse-optuna/testing_metrics/"
-    train_path = f"{cfg['strategy_name']}-{cfg['route'][0]['exchange']}-{cfg['type']}-{cfg['route'][0]['symbol']}-{cfg['route'][0]['timeframe']}-{cfg['timespan-train']['start_date']}-{cfg['timespan-train']['finish_date']}-{cfg['optimizer']}-{len(cfg['route'])} Pair"
-    test_path = f"{cfg['strategy_name']}-{cfg['route'][0]['exchange']}-{cfg['type']}-{cfg['route'][0]['symbol']}-{cfg['route'][0]['timeframe']}-{cfg['timespan-train']['start_date']}-{cfg['timespan-train']['finish_date']}-{cfg['optimizer']}-{len(cfg['route'])} Pair"
-    
-    if not os.path.exists(f"{train_temp_path}{train_path}"):
-        os.makedirs(f"{train_temp_path}{train_path}")
-    if not os.path.exists(f"{test_temp_path}{test_path}"):
-        os.makedirs(f"{test_temp_path}{test_path}")
+     
     if cfg['debug_mode']:
+        training_data_metrics['start_date'] = cfg['timespan-train']['start_date']
+        training_data_metrics['finish_date'] = cfg['timespan-train']['finish_date']
+        training_data_metrics['parameters'] = trial.params
+        pairs = []
+        for i in range(len(cfg['route'].items())):
+            pairs.append(cfg['route'][i]['symbol'])
+        pairs = ','.join(pairs)
+        training_data_metrics['pairs'] = pairs
+        training_results_df = pd.DataFrame.from_dict(training_data_metrics.items(), orient='columns')
+        testing_data_metrics['start_date'] = cfg['timespan-testing']['start_date']
+        testing_data_metrics['finish_date'] = cfg['timespan-testing']['finish_date']
+        testing_data_metrics['parameters'] = trial.params
+        testing_data_metrics['pairs'] = pairs
+        testing_results_df = pd.DataFrame.from_dict(testing_data_metrics.items(), orient='columns')  
+        train_temp_path = f"./storage/jesse-optuna/training_metrics/"
+        test_temp_path = f"./storage/jesse-optuna/testing_metrics/"
+        train_path = f"{cfg['strategy_name']}-{cfg['route'][0]['exchange']}-{cfg['type']}-{cfg['route'][0]['symbol']}-{cfg['route'][0]['timeframe']}-{cfg['timespan-train']['start_date']}-{cfg['timespan-train']['finish_date']}-{cfg['optimizer']}-{len(cfg['route'])} Pair"
+        test_path = f"{cfg['strategy_name']}-{cfg['route'][0]['exchange']}-{cfg['type']}-{cfg['route'][0]['symbol']}-{cfg['route'][0]['timeframe']}-{cfg['timespan-train']['start_date']}-{cfg['timespan-train']['finish_date']}-{cfg['optimizer']}-{len(cfg['route'])} Pair"
+        
+        if not os.path.exists(f"{train_temp_path}{train_path}"):
+            os.makedirs(f"{train_temp_path}{train_path}")
+        if not os.path.exists(f"{test_temp_path}{test_path}"):
+            os.makedirs(f"{test_temp_path}{test_path}")
         training_results_df.to_csv(f"{train_temp_path}{train_path}/{round(training_data_metrics['smart_sharpe'],3)} sharpie -training: {trial.number}-{cfg['strategy_name']}.csv", header=True, index=False, encoding='utf-8', sep=',')
         testing_results_df.to_csv(f"{test_temp_path}{test_path}/{round(testing_data_metrics['smart_sharpe'],3)} sharpie -testing: {trial.number}-{cfg['strategy_name']}.csv", header=True, index=False, encoding='utf-8', sep=',')
     
@@ -2760,23 +2790,23 @@ def objective(trial):
         'estimated_remaining_seconds': int((duration*((cfg['n_trials'] + cfg['n_trials_start']) - trial.number))/cfg['n_jobs'])
     },'optuna',cfg['main_pid'])
     
-    charset = r'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\]^_`abcdefghijklmnopqrstuvw'
-    dna = ''.join(choices(charset, k=cfg['n_trials']))
-    fitness_description = f"{cfg['fitness-ratio1']} - {cfg['fitness-ratio2']}" if cfg['mode'] == 'multi' else f"{cfg['fitness-ratio1']}"
-    best_candidates = {
-            'rank': '',
-            'dna': dna[0:2],
-            'fitness' : round(score,3) if cfg['mode'] == 'single' else (round(score,3),round(score2,3)),
-            'training_win_rate': int(training_data_metrics['win_rate'] * 100),
-            'training_total_trades': training_data_metrics['total'],
-            'training_pnl': round(training_data_metrics['net_profit_percentage'], 2),
-            'testing_win_rate': int(testing_data_metrics['win_rate'] * 100),
-            'testing_total_trades': testing_data_metrics['total'],
-            'testing_pnl': round(testing_data_metrics['net_profit_percentage'],2),
-            'hyperparameters': trial.params,
-            'fitness_description': fitness_description
-        }
-    sync_publish('best_candidates', best_candidates, 'optuna', cfg['main_pid'])
+    dna_string = (jh.hp_to_dna(hp_dict,trial.params))
+        
+    if not resumed:
+        best_candidates = {
+                'rank': '',
+                'dna': dna_string,
+                'fitness' : round(score,3) if cfg['mode'] == 'single' else (round(score,3),round(score2,3)),
+                'training_win_rate': int(training_data_metrics['win_rate'] * 100),
+                'training_total_trades': training_data_metrics['total'],
+                'training_pnl': round(training_data_metrics['net_profit_percentage'], 2),
+                'testing_win_rate': int(testing_data_metrics['win_rate'] * 100),
+                'testing_total_trades': testing_data_metrics['total'],
+                'testing_pnl': round(testing_data_metrics['net_profit_percentage'],2),
+                'hyperparameters': trial.params,
+                'fitness_description': fitness_description
+            }
+        sync_publish('best_candidates', best_candidates, 'optuna', cfg['main_pid'])
                 
     if cfg['mode'] == 'single':
         return score
