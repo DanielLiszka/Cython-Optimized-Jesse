@@ -7,9 +7,8 @@ import os
 from jesse import exceptions
 isfile = os.path.isfile
 join = os.path.join
-from alive_progress import alive_bar, config_handler
 
-from random import randint
+from random import randint, choices
 import pathlib
 import matplotlib.pyplot as plt
 import pickle
@@ -117,6 +116,7 @@ class JoblibStudy:
                          for n_trials_i in self._split_trials(n_trials, n_jobs))
 
             print('Optimization finished')
+            # releasing workers early rather than default 300 seconds
             #from joblib.externals.loky import get_reusable_executor
             #get_reusable_executor().shutdown(wait=True)
             joblib_study_finished_event.set()
@@ -371,7 +371,6 @@ signal.signal(signal.SIGTERM, signal_handler)
 def set_termination_signal():
     open("./storage/temp/termination_signal.txt", "w").close()
     
-cfg = {}
 
 def run(
         continueExistingStudy: bool,
@@ -409,7 +408,7 @@ def run(
         
     import jesse.helpers as jh
     from jesse.store import store 
-    
+        
     status_checker = Timeloop()
     @status_checker.job(interval=timedelta(seconds=1))
     def handle_time():
@@ -425,7 +424,7 @@ def run(
     dates_list = divide_date_range(start_date,finish_date) 
 
     from jesse.services.env import ENV_VALUES as _cfg_
-    global cfg
+
     cfg = {
         "debug_mode": debug_mode,
         "type": config['exchange']['type'],
@@ -539,23 +538,35 @@ def run(
         sampler = optuna.samplers.BruteForceSampler()
     elif cfg['optimizer'] == 'QMCSampler':
         sampler = optuna.samplers.QMCSampler(qmc_type=cfg[cfg['optimizer']]['qmc_type'], scramble=cfg[cfg['optimizer']]['scramble'])
+        if cfg['mode'] == 'single': 
+            defined_pruner = optuna.pruners.MedianPruner()
     elif cfg['optimizer'] == 'CmaEsSampler':
         sampler = optuna.samplers.CmaEsSampler(sigma0=cfg[cfg['optimizer']]['sigma'],n_startup_trials=cfg[cfg['optimizer']]['n_startup_trials'],consider_pruned_trials=cfg[cfg['optimizer']]['consider_pruned_trials'])
+        if cfg['mode'] == 'single': 
+            defined_pruner = optuna.pruners.PatientPruner()
     elif cfg['optimizer'] == 'RandomSampler':
         sampler = optuna.samplers.RandomSampler()
+        if cfg['mode'] == 'single': 
+            defined_pruner = optuna.pruners.MedianPruner()
     elif cfg['optimizer'] == 'NSGAIISampler': 
         sampler = optuna.samplers.NSGAIISampler(population_size=cfg[cfg['optimizer']]['population_size'],
-                                                crossover_prob=cfg[cfg['optimizer']]['crossover_prob'], swapping_prob=cfg[cfg['optimizer']]['swapping_prob']) #,constraints_func=constraints_function)
+                                                crossover_prob=cfg[cfg['optimizer']]['crossover_prob'], swapping_prob=cfg[cfg['optimizer']]['swapping_prob'],constraints_func=constraints_function)
+        if cfg['mode'] == 'single': 
+            defined_pruner = optuna.pruners.SuccessiveHalvingPruner()
     elif cfg['optimizer'] == 'NSGAIIISampler': 
         sampler = optuna.samplers.NSGAIIISampler(population_size=cfg[cfg['optimizer']]['population_size'],
                                                 crossover_prob=cfg[cfg['optimizer']]['crossover_prob'], swapping_prob=cfg[cfg['optimizer']]['swapping_prob'])
+        if cfg['mode'] == 'single': 
+            defined_pruner = optuna.pruners.SuccessiveHalvingPruner()
     elif cfg['optimizer'] == 'TPESampler':
         sampler = optuna.samplers.TPESampler(multivariate=cfg[cfg['optimizer']]['multivariate'], consider_prior= cfg[cfg['optimizer']]['consider_prior'],n_startup_trials=cfg[cfg['optimizer']]['n_startup_trials'], n_ei_candidates=cfg[cfg['optimizer']]['n_ei_candidates'],
-                                                prior_weight= cfg[cfg['optimizer']]['prior_weight'], group = cfg[cfg['optimizer']]['group']) #, constraints_func=constraints_function)
-        defined_pruner=optuna.pruners.HyperbandPruner()
+                                                prior_weight= cfg[cfg['optimizer']]['prior_weight'], group = cfg[cfg['optimizer']]['group'], constraints_func=constraints_function)
+        if cfg['mode'] == 'single': 
+            defined_pruner=optuna.pruners.HyperbandPruner()
     elif cfg['optimizer'] == 'MOTPESampler':
         sampler = optuna.samplers.MOTPESampler(consider_prior= cfg[cfg['optimizer']]['consider_prior'], prior_weight = cfg[cfg['optimizer']]['prior_weight'],n_startup_trials=cfg[cfg['optimizer']]['n_startup_trials'], n_ehvi_candidates=cfg[cfg['optimizer']]['n_ei_candidates'])
-        defined_pruner=optuna.pruners.HyperbandPruner()
+        if cfg['mode'] == 'single': 
+            defined_pruner=optuna.pruners.HyperbandPruner()
         
     optuna.logging.set_verbosity(10)
     optuna.logging.enable_propagation()
@@ -610,8 +621,9 @@ def run(
             study = JoblibStudy(study_name=study_name, direction="maximize", sampler=sampler,
                                         storage=storage, load_if_exists=False,pruner=defined_pruner)                            
 
-
-
+    
+    cfg['n_trials_start'] = study.trials[-1].number if study.trials else 1
+    cfg['main_pid'] = os.getpid()
     study.set_user_attr("strategy_name", cfg['strategy_name'])
     study.set_user_attr("exchange", cfg['route'][0]['exchange'])
     study.set_user_attr("symbol", cfg['route'][0]['symbol'])
@@ -795,8 +807,9 @@ def analysis(study,save_time=False):
     extra_files = False
     
     parallel = Parallel(n_jobs=cfg['n_jobs'],  backend='loky', verbose=0, max_nbytes=None)
-    results = parallel(delayed(metrics_func)(best_trial,missing_files,extra_files,cfg,Interval_start,Interval_end,dir1)
-                for best_trial in sorted_candidate_trial_list)
+    with parallel:
+        results = parallel(delayed(metrics_func)(best_trial,missing_files,extra_files,cfg,Interval_start,Interval_end,dir1)
+                    for best_trial in sorted_candidate_trial_list)
     delete_files = glob.glob(f'{dir1}/*-delete')
     if delete_files:
         for file in delete_files:
@@ -836,8 +849,9 @@ def analysis(study,save_time=False):
     if not os.path.exists('./storage/charts/jesse-optuna'):
         os.mkdir('./storage/charts/jesse-optuna')
     if missing_files:
-        parallel(delayed(full_metrics_func)(dir1,best_trial, Interval_start, Interval_end, cfg)
-            for best_trial in sorted_candidate_trial_list)
+        with parallel:
+            parallel(delayed(full_metrics_func)(dir1,best_trial, Interval_start, Interval_end, cfg)
+                for best_trial in sorted_candidate_trial_list)
         delete_files = glob.glob(f'{dir1}/*-delete')
         if delete_files:
             for file in delete_files:
@@ -963,8 +977,9 @@ def analysis(study,save_time=False):
         file_count = sum(1 for item in os.listdir(dir1) if isfile(join(dir1, item))) 
         # for trial in sorted_candidate_trial_list:
             # print(trial.number)
-        parallel(delayed(random_params_func)(dir1, output_df, full_metrics_dict,cfg,index)
-            for index in range(0,len(sorted_candidate_trial_list)))
+        with parallel:
+            parallel(delayed(random_params_func)(dir1, output_df, full_metrics_dict,cfg,index)
+                for index in range(0,len(sorted_candidate_trial_list)))
             
         update_2 = False
                     
@@ -973,8 +988,9 @@ def analysis(study,save_time=False):
         """ 
         update_4 = True
         
-        parallel(delayed(random_pairs_func)(dir1,output_df,cfg,index,sorted_candidate_trial_list)
-            for index in range(0,len(sorted_candidate_trial_list)))
+        with parallel:
+            parallel(delayed(random_pairs_func)(dir1, output_df, cfg, index, sorted_candidate_trial_list)
+                     for index in range(len(sorted_candidate_trial_list)))
         
         update_4 = False
 
@@ -988,8 +1004,9 @@ def analysis(study,save_time=False):
         
         jesse_config['env']['simulation']['skip'] = False
 
-        parallel(delayed(multiple_timeframes_func)(dir1,output_df,cfg,index,sorted_candidate_trial_list)
-            for index in range(0,len(sorted_candidate_trial_list)))
+        with parallel:
+            parallel(delayed(multiple_timeframes_func)(dir1, output_df, cfg, index, sorted_candidate_trial_list)
+                     for index in range(len(sorted_candidate_trial_list)))
             
         jesse_config['env']['simulation']['skip'] = True
         
@@ -1003,7 +1020,8 @@ def analysis(study,save_time=False):
     
     # moved to multiple_timeframes_func
     # parallel(delayed(quant_func)(dir1,best_trial,Interval_start,Interval_end,cfg,run_silently=False)
-        # for best_trial in sorted_candidate_trial_list)    
+        # for best_trial in sorted_candidate_trial_list)   
+        
     for chart in os.listdir('./storage/charts/jesse-optuna/'):
         try:
             os.remove(f'./storage/charts/jesse-optuna/{chart}')
@@ -2469,10 +2487,12 @@ def _check_termination():
     return os.path.exists("./storage/temp/termination_signal.txt")
         
 def objective(trial):
+    start_time = time.time()
     if _check_termination():
         trial.study.stop()
 
     cfg = get_config()
+    
     StrategyClass = jh.get_strategy_class(cfg['strategy_name'])
     hp_dict = StrategyClass().hyperparameters()
 
@@ -2511,24 +2531,7 @@ def objective(trial):
     except Exception as err:
         logger.error("".join(traceback.TracebackException.from_exception(err).format()))
         raise err
-
-    try:
-        testing_data_metrics = optuna_backtest_function(cfg['timespan-testing']['start_date'], cfg['timespan-testing']['finish_date'], trial.params, cfg, optimizing=True)
-        if testing_data_metrics is None:
-            raise optuna.TrialPruned()
-    except Exception as err:
-        logger.error("".join(traceback.TracebackException.from_exception(err).format()))
-        raise err
         
-    #constraints_violation must be negative to proceed. Only used for NSGAIISampler and MOTPESampler
-    if cfg['optimizer'] == ('NSGAIISampler' or 'MOTPESampler'):
-        constraints_violation1 =  -1*testing_data_metrics['omega_ratio']+0.9
-        constraints_violation2 = -1*testing_data_metrics['kelly_criterion']
-        trial.set_user_attr("constraint", (constraints_violation1,constraints_violation2))
-    # print(constraints_violation1)
-    # print(constraints_violation2)
-
-
     if training_data_metrics['total'] <= cfg['optimal-total']:
         raise optuna.TrialPruned()
 
@@ -2569,6 +2572,8 @@ def objective(trial):
         raise optuna.TrialPruned
 
     score = total_effect_rate * ratio_normalized
+    if cfg['mode'] == 'single':
+        trial.report(score, 1)
     trial.set_user_attr(f"training_score_1", score)
     
     if cfg['mode'] == 'multi':
@@ -2607,7 +2612,23 @@ def objective(trial):
             raise optuna.TrialPruned()
         score2 = total_effect_rate * ratio_normalized2
         trial.set_user_attr(f"training_score_2", score2)
-
+    
+    try:
+        testing_data_metrics = optuna_backtest_function(cfg['timespan-testing']['start_date'], cfg['timespan-testing']['finish_date'], trial.params, cfg, optimizing=True)
+        if testing_data_metrics is None:
+            raise optuna.TrialPruned()
+    except Exception as err:
+        logger.error("".join(traceback.TracebackException.from_exception(err).format()))
+        raise err
+        
+    #constraints_violation must be negative to proceed. Only used for NSGAIISampler and TPESampler
+    if cfg['optimizer'] in ['NSGAIISampler', 'TPESampler']:
+        constraints_violation1 =  -1*testing_data_metrics['omega_ratio']+0.9
+        constraints_violation2 = -1*testing_data_metrics['kelly_criterion']
+        trial.set_user_attr("constraint", (constraints_violation1,constraints_violation2))
+    # print(constraints_violation1)
+    # print(constraints_violation2)
+    
     for key, value in testing_data_metrics.items():
         if isinstance(value, np.integer):
             value = int(value)
@@ -2732,6 +2753,31 @@ def objective(trial):
         training_results_df.to_csv(f"{train_temp_path}{train_path}/{round(training_data_metrics['smart_sharpe'],3)} sharpie -training: {trial.number}-{cfg['strategy_name']}.csv", header=True, index=False, encoding='utf-8', sep=',')
         testing_results_df.to_csv(f"{test_temp_path}{test_path}/{round(testing_data_metrics['smart_sharpe'],3)} sharpie -testing: {trial.number}-{cfg['strategy_name']}.csv", header=True, index=False, encoding='utf-8', sep=',')
     
+    duration = round(time.time() - start_time,3)
+    progressbar_current = int((trial.number - cfg['n_trials_start']) / cfg['n_trials'] * 100)
+    sync_publish('progressbar', {
+        'current': progressbar_current,
+        'estimated_remaining_seconds': int((duration*((cfg['n_trials'] + cfg['n_trials_start']) - trial.number))/cfg['n_jobs'])
+    },'optuna',cfg['main_pid'])
+    
+    charset = r'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\]^_`abcdefghijklmnopqrstuvw'
+    dna = ''.join(choices(charset, k=cfg['n_trials']))
+    fitness_description = f"{cfg['fitness-ratio1']} - {cfg['fitness-ratio2']}" if cfg['mode'] == 'multi' else f"{cfg['fitness-ratio1']}"
+    best_candidates = {
+            'rank': '',
+            'dna': dna[0:2],
+            'fitness' : round(score,3) if cfg['mode'] == 'single' else (round(score,3),round(score2,3)),
+            'training_win_rate': int(training_data_metrics['win_rate'] * 100),
+            'training_total_trades': training_data_metrics['total'],
+            'training_pnl': round(training_data_metrics['net_profit_percentage'], 2),
+            'testing_win_rate': int(testing_data_metrics['win_rate'] * 100),
+            'testing_total_trades': testing_data_metrics['total'],
+            'testing_pnl': round(testing_data_metrics['net_profit_percentage'],2),
+            'hyperparameters': trial.params,
+            'fitness_description': fitness_description
+        }
+    sync_publish('best_candidates', best_candidates, 'optuna', cfg['main_pid'])
+                
     if cfg['mode'] == 'single':
         return score
     else:
@@ -2739,7 +2785,7 @@ def objective(trial):
 
 def constraints_function(trial):
     return trial.user_attrs["constraint"]
-    
+  
 def validate_cwd() -> None:
     """
     make sure we're in a Jesse project
