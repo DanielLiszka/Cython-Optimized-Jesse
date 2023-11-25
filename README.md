@@ -10,7 +10,7 @@ This is a maintained modified version of the Jesse backtesting framework. Create
 * Monte Carlo Simulation
 * Integrated Optuna optimization
 * Correlation table generation
-* Backtest chart generation with automatic indicator plotting
+* Backtest chart generation
 * Significantly improved backtest simulation speed
 * Polygon.io stock and forex candle importing driver
 
