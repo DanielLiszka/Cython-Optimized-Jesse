@@ -66,6 +66,8 @@ from openpyxl.drawing.text import (
     ParagraphProperties,
     CharacterProperties,
 )
+from openpyxl.chart.data_source import StrRef
+from openpyxl.chart.series import SeriesLabel
 from openpyxl.drawing.image import Image
 from openpyxl.utils.cell import coordinate_from_string, get_column_letter
 from jesse.services.redis import process_status, sync_publish
@@ -455,6 +457,10 @@ def run(
         "optimizer": optimizer,
         "Interval_end": finish_date,
         "Interval_start": start_date,
+        "pair-testing":{
+            "finish_date": dates_list[3],
+            "start_date": dates_list[0],
+            },
         "timespan-testing": {
             "finish_date": dates_list[3], 
             "start_date": dates_list[2],
@@ -622,6 +628,7 @@ def run(
                                         storage=storage, load_if_exists=False,pruner=defined_pruner)                            
 
     cfg['study_full_name'] = study_name
+    cfg['start_time'] = jh.now_to_timestamp()
     cfg['n_trials_start'] = study.trials[-1].number if study.trials else 0
     cfg['main_pid'] = os.getpid()
     study.set_user_attr("strategy_name", cfg['strategy_name'])
@@ -634,7 +641,18 @@ def run(
     write_dict_to_yaml(cfg)
     #df = (study.trials_dataframe())
     study.optimize(objective, n_jobs=cfg['n_jobs'], n_trials=cfg['n_trials'])
-    #analysis(study)
+    if process_status() == 'started':
+        sync_publish('progressbar', {
+            'current': 100,
+            'estimated_remaining_seconds': 0
+        },'optuna')
+        sync_publish('alert', {
+            'message': f"Finished {cfg['n_trials']} iterations. Check your best DNA candidates, "
+                       f"if you don't like any of them, try modifying your strategy.",
+            'type': 'success'
+        }, 'optuna')
+        
+        #analysis(study)
     
     
 def analyze()-> None:
@@ -1622,9 +1640,14 @@ def openpyxl_formating(df,base_filename,trial_num,cfg):
     chart1.set_categories(dates)
     s1 = chart1.series[0]
     s1.marker.symbol = "diamond"
-    if len(chart1.series) > 0:
-        chart1.series[0].graphicalProperties.line.solidFill = "00AAAA"  
-        chart1.series[0].title = series_name
+    # if len(chart1.series) > 0:
+        # chart1.series[0].graphicalProperties.line.solidFill = "00AAAA"  
+        # series1_title_str_ref = StrRef()
+        # series1_title_str_ref.f = series_name
+        
+        # series1_title = SeriesLabel()
+        # series1_title.strRef = series1_title_str_ref
+        # chart1.series[0].title = series1_title
     # chart1.dataLabels = DataLabelList()
     # chart1.dataLabels.showVal = True
     
@@ -1647,9 +1670,11 @@ def openpyxl_formating(df,base_filename,trial_num,cfg):
     set_chart_title_size(chart2,size=1400)
     chart2.add_data(chart2_data, titles_from_data=False)
     chart2.set_categories(dates)
-    if len(chart2.series) > 0:
-        chart2.series[0].graphicalProperties.line.solidFill = "00AAAA"  
-        chart2.series[0].title = series_name2
+    # if len(chart2.series) > 0:
+        # chart2.series[0].graphicalProperties.line.solidFill = "00AAAA"  
+        # series2_title = SeriesLabel()
+        # series2_title.strRef = series_name2
+        # chart2.series[0].title = series2_title
     # s2 = chart2.series[0]
     # s2.marker.symbol = "diamond"
     # chart2.dataLabels = DataLabelList()
@@ -1671,9 +1696,11 @@ def openpyxl_formating(df,base_filename,trial_num,cfg):
     set_chart_title_size(chart3,size=1400)
     chart3.add_data(chart3_data, titles_from_data=False)
     chart3.set_categories(dates)
-    if len(chart3.series) > 0:
-        chart3.series[0].graphicalProperties.line.solidFill = "00AAAA"  
-        chart3.series[0].title = series_name
+    # if len(chart3.series) > 0:
+        # chart3.series[0].graphicalProperties.line.solidFill = "00AAAA"  
+        # series3_title = SeriesLabel()
+        # series3_title.strRef = series_name
+        # chart3.series[0].title = series3_title
     # s2 = chart2.series[0]
     # s2.marker.symbol = "diamond"
     # chart2.dataLabels = DataLabelList()
@@ -1697,9 +1724,11 @@ def openpyxl_formating(df,base_filename,trial_num,cfg):
     set_chart_title_size(chart4,size=1400)
     chart4.add_data(chart4_data, titles_from_data=False)
     chart4.set_categories(dates)
-    if len(chart4.series) > 0:
-        chart4.series[0].graphicalProperties.line.solidFill = "00AAAA"  
-        chart4.series[0].title = series_name3
+    # if len(chart4.series) > 0:
+        # chart4.series[0].graphicalProperties.line.solidFill = "00AAAA"  
+        # series4_title = SeriesLabel()
+        # series4_title.strRef = series_name3
+        # chart4.series[0].title = series4_title
     # s2 = chart2.series[0]
     # s2.marker.symbol = "diamond"
     # chart2.dataLabels = DataLabelList()
@@ -2807,7 +2836,15 @@ def objective(trial):
                 'fitness_description': fitness_description
             }
         sync_publish('best_candidates', best_candidates, 'optuna', cfg['main_pid'])
-                
+
+    general_info = {
+        'started_at': jh.timestamp_to_arrow(cfg['start_time']).humanize(),
+        'index': f"{trial.number}/{cfg['n_trials']+cfg['n_trials_start']}",
+        'trading_route': '-'.join(cfg['study_full_name'].split('-')[0:-1]),
+        'average_execution_seconds': duration,
+        'optimizer': cfg['optimizer']
+        }
+    sync_publish('general_info', general_info,'optuna',cfg['main_pid'])
     if cfg['mode'] == 'single':
         return score
     else:
