@@ -68,7 +68,6 @@ class OptunaRequestJson(BaseModel):
     prior_weight: float
     n_startup_trials: int
     n_ei_candidates: int
-    gamma: float
     group: bool 
     sigma: float
     consider_pruned_trials: bool
@@ -77,6 +76,7 @@ class OptunaRequestJson(BaseModel):
     swapping_prob: float
     qmc_type: str
     scramble: bool
+    n_trials: int
 
 class OptunaSpecialRequestJson(BaseModel):
     id: str

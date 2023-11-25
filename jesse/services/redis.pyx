@@ -28,14 +28,20 @@ if 'strategies' in ls and 'storage' in ls:
     )
 
 
-def sync_publish(event: str, msg):
+def sync_publish(event: str, msg, mode: str = None,id = None):
     if jh.is_unit_testing():
         raise EnvironmentError('sync_publish() should be NOT called during testing. There must be something wrong')
-
+    if mode != None:
+        event_info = mode
+        id = id if id != None else os.getpid()
+    else:
+        event_info = jh.app_mode()
+        id = os.getpid()
+        
     sync_redis.publish(
         f"{ENV_VALUES['APP_PORT']}:channel:1", json.dumps({
-            'id': os.getpid(),
-            'event': f'{jh.app_mode()}.{event}',
+            'id': id,
+            'event': f'{event_info}.{event}',
             'data': msg
         }, ignore_nan=True, cls=NpEncoder)
     )

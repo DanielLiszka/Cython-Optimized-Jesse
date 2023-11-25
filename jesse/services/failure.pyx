@@ -5,14 +5,14 @@ import traceback
 from jesse.services.redis import sync_publish
 
 
-def register_custom_exception_handler() -> None:
+def register_custom_exception_handler(mode:str=None) -> None:
     # other threads
     def handle_thread_exception(args) -> None:
         if args.exc_type == SystemExit:
             return
 
         if args.exc_type.__name__ == 'Termination':
-            sync_publish('termination', {})
+            sync_publish('termination', {},mode=mode)
             jh.terminate_app()
         else:
             # send notifications if it's a live session

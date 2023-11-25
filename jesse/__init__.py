@@ -378,9 +378,8 @@ async def optuna(
             study_name += '-multi'
         else:
             study_name += '-single'
-        print(study_name)
+            
         study_exists = check_study_exists(study_name)
-        print(f'exists: {study_exists}')
         if study_exists and not request_json.checked_study:
             return JSONResponse({"study_exists": True, "message": "A study with the same name already exists."}, status_code=200)
         
@@ -404,7 +403,6 @@ async def optuna(
             request_json.prior_weight,
             request_json.n_startup_trials,
             request_json.n_ei_candidates,
-            request_json.gamma,
             request_json.group,
             request_json.sigma,
             request_json.consider_pruned_trials,
@@ -415,7 +413,7 @@ async def optuna(
             request_json.scramble,
             request_json.n_trials
         )
-
+        
         return JSONResponse({'message': 'Started optuna...'}, status_code=202)
     else:
         raise HTTPException(status_code=400, detail="Invalid Request Type")
