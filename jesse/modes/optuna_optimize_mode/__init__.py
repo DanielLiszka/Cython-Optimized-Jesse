@@ -641,7 +641,14 @@ def run(
     write_dict_to_yaml(cfg)
     #df = (study.trials_dataframe())
     study.optimize(objective, n_jobs=cfg['n_jobs'], n_trials=cfg['n_trials'])
+    general_info = {
+        'started_at': jh.timestamp_to_arrow(cfg['start_time']).humanize(),
+        'index': f"{cfg['n_trials']+cfg['n_trials_start']}/{cfg['n_trials']+cfg['n_trials_start']}",
+        'trading_route': '-'.join(cfg['study_full_name'].split('-')[0:-1]),
+        'optimizer': cfg['optimizer']
+    }
     if process_status() == 'started':
+        sync_publish('general_info',general_info,'optuna')
         sync_publish('progressbar', {
             'current': 100,
             'estimated_remaining_seconds': 0
