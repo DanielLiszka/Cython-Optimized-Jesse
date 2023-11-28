@@ -16,7 +16,6 @@ import shutil
 import subprocess
 import traceback
 import webbrowser
-import math
 import ast
 from jesse.routes import router
 import random
@@ -33,6 +32,7 @@ import pkg_resources
 import yaml
 import joblib
 import copy
+import math
 from jesse.research import backtest, get_candles
 #from .JoblilbStudy import JoblibStudy
 from subprocess import * 
@@ -106,14 +106,14 @@ class JoblibStudy:
     def optimize(self, func, n_trials=1, n_jobs=-1, **optimize_parameters):
         if n_jobs == -1:
             n_jobs = joblib.cpu_count()
-            joblib_study_finished_event.set()
             print('Optimization finished')
+            joblib_study_finished_event.set()
         if n_jobs == 1:
             self.study.optimize(func, n_trials=n_trials, gc_after_trial=True, **optimize_parameters)
-            joblib_study_finished_event.set()
             print('Optimization finished')
+            joblib_study_finished_event.set()
         else:
-            with joblib.Parallel(n_jobs, backend='loky', verbose=10, max_nbytes=None) as parallel:
+            with joblib.Parallel(n_jobs, backend='multiprocessing', verbose=10, max_nbytes=None) as parallel:
                 parallel(joblib.delayed(self._optimize_study)(func, n_trials=n_trials_i, **optimize_parameters)
                          for n_trials_i in self._split_trials(n_trials, n_jobs))
 
@@ -140,7 +140,7 @@ class JoblibStudy:
             
             
 logger = logging.getLogger()
-logger.addHandler(logging.FileHandler("jesse-optuna.log", mode="w"))
+logger.addHandler(logging.FileHandler("optuna.log", mode="w"))
 
 optuna.logging.enable_propagation()
 
@@ -150,7 +150,10 @@ memory = Memory(cachedir, verbose=0)
 
 
 def clear_cache() -> None: 
-    memory.clear(warn=False)
+    try:
+        memory.clear(warn=False)
+    except:
+        pass
 
 def clear_database() -> None:
     from jesse.services.env import ENV_VALUES as cfg_
@@ -367,8 +370,8 @@ def signal_handler(signum, frame):
     reset_termination_signal()
     sys.exit(1)
 
-signal.signal(signal.SIGINT, signal_handler)
-signal.signal(signal.SIGTERM, signal_handler)
+# signal.signal(signal.SIGINT, signal_handler)
+# signal.signal(signal.SIGTERM, signal_handler)
     
 def set_termination_signal():
     open("./storage/temp/termination_signal.txt", "w").close()
@@ -400,9 +403,17 @@ def run(
         swapping_prob: float,
         qmc_type: str,
         scramble: bool,
-        n_trials: int):
+        n_trials: int,
+        do_analysis: bool,
+        validation_interval: int,
+        robust_test_iteration_count: int,
+        robust_test_max: float,
+        robust_test_min: float,
+        max_final_number_of_validation_results: int,
+        optuna_visualizations: bool):
         
     validate_cwd()
+        
     reset_termination_signal()
     db_exists = database_exists()
     if not db_exists:
@@ -422,6 +433,23 @@ def run(
     status_checker.start()
     register_custom_exception_handler('optuna')
     store.app.set_session_id()
+    
+    if do_analysis: 
+        cfg = get_config()
+        cfg["validation_interval"] = validation_interval
+        cfg["robust_test_iteration_count"] = robust_test_iteration_count
+        cfg["robust_test_max"] = robust_test_max
+        cfg["robust_test_min"] = robust_test_min
+        cfg["max_final_number_of_validation_results"] = max_final_number_of_validation_results
+        cfg["optuna_visualizations"] = optuna_visualizations
+        write_dict_to_yaml(cfg)
+        storage = f"postgresql://jesse_user:{cfg['postgres_password']}@{cfg['postgres_host']}:{cfg['postgres_port']}/optuna_db"
+        study_history = optuna.load_study(study_name=cfg['study_full_name'], storage=storage)
+        analysis(study_history)
+        sync_publish('analysisFinished',{},'optuna')
+        sync_publish('progressString', 'testing', 'optuna')
+        print('analysis finished')
+        return 
         
     dates_list = divide_date_range(start_date,finish_date) 
 
@@ -438,7 +466,7 @@ def run(
         "postgres_db_name": "optuna_db",
         "postgres_host": _cfg_['POSTGRES_HOST'],
         "postgres_password": _cfg_['POSTGRES_PASSWORD'],
-        "postgres_port": _cfg_['POSTGRES_PORT'],
+        "postgres_port": int(_cfg_['POSTGRES_PORT']),
         "postgres_username": "jesse_user",
         "robust_test_iteration_count": 3,
         "robust_test_max": 6,
@@ -592,7 +620,7 @@ def run(
     if continueExistingStudy:
         if cfg['mode'] == 'multi':
             study_name = f'{study_name}-multi'
-            if cfg['dual_mode'] == 'maximize':
+            if cfg['dual_mode'] == 'Maximize':
                 study = JoblibStudy(study_name=study_name, directions=["maximize", "maximize"], sampler=sampler,
                             storage=storage, load_if_exists=True,pruner=defined_pruner)
             else:
@@ -611,7 +639,7 @@ def run(
             except Exception as e:
                 print(e)
                 pass
-            if cfg['dual_mode'] == 'maximize':
+            if cfg['dual_mode'] == 'Maximize':
                 study = JoblibStudy(study_name=study_name, directions=["maximize", "maximize"], sampler=sampler,
                             storage=storage, load_if_exists=False,pruner=defined_pruner)
             else:
@@ -631,16 +659,41 @@ def run(
     cfg['start_time'] = jh.now_to_timestamp()
     cfg['n_trials_start'] = study.trials[-1].number if study.trials else 0
     cfg['main_pid'] = os.getpid()
+    cfg["optuna_visualizations"] = optuna_visualizations
     study.set_user_attr("strategy_name", cfg['strategy_name'])
     study.set_user_attr("exchange", cfg['route'][0]['exchange'])
     study.set_user_attr("symbol", cfg['route'][0]['symbol'])
     study.set_user_attr("timeframe", cfg['route'][0]['timeframe'])
     study.set_user_attr("timespan_train", cfg['timespan-train']['start_date'] + " -> " + cfg['timespan-train']['finish_date'])
     study.set_user_attr("timespan_testing", cfg['timespan-testing']['start_date'] + " -> " + cfg['timespan-testing']['finish_date'])
-
+    current_time = datetime.now()
+    study.set_user_attr("created_at :",current_time.strftime("%Y-%m-%d %H:%M:%S") )
     write_dict_to_yaml(cfg)
     #df = (study.trials_dataframe())
     study.optimize(objective, n_jobs=cfg['n_jobs'], n_trials=cfg['n_trials'])
+    
+    if not check_previous_n_trials_for_completion(study, cfg['n_trials_start']):
+        best_candidates_array = []
+        all_trials =  study.get_trials(states=[optuna.trial.TrialState.COMPLETE])
+        if len(all_trials) > 0:
+            for _trial in all_trials:
+                dna_string = jh.hp_to_dna(hp_dict, _trial.params)
+                best_candidate = {
+                    'rank': _trial.number,
+                    'dna': dna_string,
+                    'fitness': round(_trial.user_attrs.get('training_score_1',-1),3) if cfg['mode'] == 'single' else (round(_trial.user_attrs.get('training_score_1',-1),3),round(_trial.user_attrs.get('training_score_2',-1),3)),  
+                    'training_win_rate': int(_trial.user_attrs.get('training-win_rate',-1) * 100),
+                    'training_total_trades': _trial.user_attrs.get('training-total',-1),
+                    'training_pnl': round(_trial.user_attrs.get('training-net_profit_percentage',-1), 2),
+                    'testing_win_rate': int(_trial.user_attrs.get('testing-win_rate',-1) * 100),
+                    'testing_total_trades': _trial.user_attrs.get('testing-total',-1),
+                    'testing_pnl': round(_trial.user_attrs.get('testing-net_profit_percentage',-1),2),
+                    'hyperparameters': _trial.params,
+                    'fitness_description': fitness_description
+                }
+                best_candidates_array.append(best_candidate)
+            sync_publish('best_candidates', best_candidates_array, 'optuna')
+        
     general_info = {
         'started_at': jh.timestamp_to_arrow(cfg['start_time']).humanize(),
         'index': f"{cfg['n_trials']+cfg['n_trials_start']}/{cfg['n_trials']+cfg['n_trials_start']}",
@@ -658,9 +711,17 @@ def run(
                        f"if you don't like any of them, try modifying your strategy.",
             'type': 'success'
         }, 'optuna')
-        
-        #analysis(study)
+
     
+def check_previous_n_trials_for_completion(study, n):
+    if len(study.trials) < n:
+        return False
+
+    for trial in study.trials[-n:]:
+        if trial.state == optuna.trial.TrialState.COMPLETE:
+            return True
+
+    return False
     
 def analyze()-> None:
     validate_cwd()
@@ -679,32 +740,13 @@ def analyze()-> None:
 def analysis(study,save_time=False):
     validate_cwd()
     cfg = get_config()
-    
-    # train_path = f"./storage/jesse-optuna/training_metrics/{cfg['strategy_name']}-{cfg['route'][0]['exchange']}-{cfg['type']}-{cfg['route'][0]['symbol']}-{cfg['route'][0]['timeframe']}-{cfg['timespan-train']['start_date']}-{cfg['timespan-train']['finish_date']}-{cfg['optimizer']}-{len(cfg['route'])} Pair"
-    # test_path = f"./storage/jesse-optuna/testing_metrics/{cfg['strategy_name']}-{cfg['route'][0]['exchange']}-{cfg['type']}-{cfg['route'][0]['symbol']}-{cfg['route'][0]['timeframe']}-{cfg['timespan-train']['start_date']}-{cfg['timespan-train']['finish_date']}-{cfg['optimizer']}-{len(cfg['route'])} Pair"
-    
-    # if not os.path.exists(train_path):
-        # os.makedirs(train_path)
-    # if not os.path.exists(test_path):
-        # os.makedirs(test_path)
-    
-    # source_train_path = f"//root/Installs/jesse-optuna-master/temp/training_metrics/{cfg['strategy_name']}-{cfg['route'][0]['exchange']}-{cfg['type']}-{cfg['route'][0]['symbol']}-{cfg['route'][0]['timeframe']}-{cfg['timespan-train']['start_date']}-{cfg['timespan-train']['finish_date']}-{cfg['optimizer']}-{len(cfg['route'])} Pair"
-    # source_test_path = f"//root/Installs/jesse-optuna-master/temp/testing_metrics/{cfg['strategy_name']}-{cfg['route'][0]['exchange']}-{cfg['type']}-{cfg['route'][0]['symbol']}-{cfg['route'][0]['timeframe']}-{cfg['timespan-train']['start_date']}-{cfg['timespan-train']['finish_date']}-{cfg['optimizer']}-{len(cfg['route'])} Pair"
-    
-    # files1 = os.listdir(source_train_path)
-    # files2 = os.listdir(source_test_path) 
-    
-    # for fname in files1: 
-        # shutil.copy2(os.path.join(source_train_path,fname),train_path)
-        # os.remove(os.path.join(source_train_path,fname))
-    # for fname in files2: 
-        # shutil.copy2(os.path.join(source_test_path,fname),test_path)
-        # os.remove(os.path.join(source_test_path,fname))
+    sync_publish('progressString', 'Sorting Trials' ,'optuna')
         
     start_date = cfg['timespan-train']['start_date']
-    finish_date = cfg['timespan-train']['finish_date']
+    finish_date = cfg['timespan-testing']['finish_date']
     study_name = f"{cfg['strategy_name']}-{cfg['route'][0]['exchange']}-{cfg['route'][0]['symbol']}-{cfg['route'][0]['timeframe']}-{start_date}-{finish_date}"
-    with open(f'./storage/jesse-optuna/results/{study_name}-results.txt', "w+") as f:
+    # study_name = cfg['study_full_name']
+    with open(f'./storage/optuna/results/{study_name}-results.txt', "w+") as f:
         f.write(f"Number of finished trials: {len(study.trials)}\n")
         trials = sorted(study.best_trials, key=lambda t: t.values)
         final_trials = []
@@ -722,27 +764,10 @@ def analysis(study,save_time=False):
         for trial in final_trials:
             f.write(
                 f"Trial: {trial.number} Values: {trial.values} Params: {trial.params}\n")
-    global done
-    global update_1 
-    global update_2
-    global update_3
-    global update_4
-    global update_full 
-    global final_update
-    global update_filt
-    final_update = False
-    update_1 = False
-    update_2 = False
-    update_3 = False
-    update_4 = False
-    update_full = False
-    update_filt = False
-    done = False
 
     # study_summaries = optuna.study_get_all_study_summaries(storage=storage)
     # try:
     #Trial sorting assuming ['maximize']['maximize'] or ['maximize'] directions.
-    update_filt = True
     
     trials = study.get_trials()
     candidate_trial_list = []
@@ -758,7 +783,7 @@ def analysis(study,save_time=False):
             continue
         param_list.append(trial.params)
         if cfg['mode'] == 'multi':
-            if cfg['dual_mode'] == "maximize":
+            if cfg['dual_mode'] == "Maximize":
                 if trial.user_attrs['testing_score_1'] < trial.user_attrs['training_score_1'] and trial.user_attrs['testing_score_2'] < trial.user_attrs['training_score_2']:
                     continue
             else:
@@ -781,7 +806,7 @@ def analysis(study,save_time=False):
     sorted_candidate_trial_list = []
     for trial in candidate_trial_list:
         if cfg['mode'] == 'multi':
-            if cfg['dual_mode'] == 'maximize':
+            if cfg['dual_mode'] == 'Maximize':
                 if trial.user_attrs['testing_score_1'] < average_testing_score_1 and trial.user_attrs['testing_score_2'] < average_testing_score_2:
                     continue
             else:
@@ -792,36 +817,49 @@ def analysis(study,save_time=False):
                 continue 
         sorted_candidate_trial_list.append(trial)   
         
-    dir1 = f"./storage/jesse-optuna/validation_metrics/{cfg['strategy_name']}-{cfg['route'][0]['exchange']}-{cfg['route'][0]['symbol']}-{cfg['route'][0]['timeframe']}-{cfg['Interval_start']}-{cfg['Interval_end']}-{cfg['optimizer']}-{len(cfg['route'].items())} Pairs/"  
+    dir1 = f"./storage/optuna/validation/{cfg['strategy_name']}-{cfg['route'][0]['exchange']}-{cfg['route'][0]['symbol']}-{cfg['route'][0]['timeframe']}-{cfg['Interval_start']}-{cfg['Interval_end']}-{cfg['optimizer']}-{len(cfg['route'].items())} Pairs/"  
     sorted_candidate_trial_list_removal = []
     if os.path.exists(f'{dir1}removed_candidates.pkl') and save_time:
         with open(f'{dir1}removed_candidates.pkl', 'rb') as fp:
             sorted_candidate_trial_list_removal = pickle.load(fp)
     sorted_candidate_trial_list = [x for x in sorted_candidate_trial_list if x not in sorted_candidate_trial_list_removal]
-    update_filt = False
+
         
     """
     Interval backtesting analysis
     """
-    update_1 = True
-    if not os.path.exists(dir1):
-        os.mkdir(dir1)
-    if os.path.exists(f'{dir1}temp'):
-        try: 
-            for file in os.listdir(f'{dir1}temp'):
-                os.remove(f'{dir1}temp/{file}')
-        except:
-            pass
-        os.rmdir(f'{dir1}temp')
-    try: 
-        for file in os.listdir(dir1):
-            if file != f'removed_candidates.pkl':
-                os.remove(f'{dir1}{file}')
-    except:
-        pass
+    sync_publish('progressString', 'Rolling window backtesting' ,'optuna')
         
-    if not os.path.exists(f'{dir1}temp'):
-        os.mkdir(f'{dir1}temp')
+    # Create the directory if it doesn't exist
+    if not os.path.exists(dir1):
+        os.makedirs(dir1)
+
+    # Delete files in the 'temp' subdirectory
+    temp_dir = os.path.join(dir1, 'temp')
+    if os.path.exists(temp_dir):
+        for file in os.listdir(temp_dir):
+            file_path = os.path.join(temp_dir, file)
+            safe_remove(file_path)
+
+        # Check if the directory is empty before removing
+        if not os.listdir(temp_dir):
+            try:
+                os.rmdir(temp_dir)
+            except Exception as e:
+                pass
+
+    # Delete specific files in the main directory
+    for file in os.listdir(dir1):
+        if file != 'removed_candidates.pkl':
+            file_path = os.path.join(dir1, file)
+            safe_remove(file_path)
+           
+        try: 
+            if not os.path.exists(f'{dir1}temp'):
+                os.mkdir(f'{dir1}temp')
+        except Exception as e: 
+            print(e)
+            pass
         
     Interval_start = cfg['Interval_start']
     Interval_end = cfg['Interval_end']
@@ -832,7 +870,7 @@ def analysis(study,save_time=False):
     missing_files = False
     extra_files = False
     
-    parallel = Parallel(n_jobs=cfg['n_jobs'],  backend='loky', verbose=0, max_nbytes=None)
+    parallel = Parallel(n_jobs=cfg['n_jobs'],  backend='multiprocessing', verbose=0, max_nbytes=None)
     with parallel:
         results = parallel(delayed(metrics_func)(best_trial,missing_files,extra_files,cfg,Interval_start,Interval_end,dir1)
                     for best_trial in sorted_candidate_trial_list)
@@ -855,25 +893,40 @@ def analysis(study,save_time=False):
         for file in os.listdir(dir1):
             if file != f'removed_candidates.pkl':
                 file = f"{dir1}{file}"
-                if os.path.getsize(file) < (2 * 1024):
-                    os.remove(file)
+                try:
+                    if os.path.getsize(file) < (2 * 1024):
+                        try:
+                            os.remove(file)
+                        except Exception as e:
+                            print(e)
+                except Exception as e:
+                    print(e)
     try:
         os.rmdir(f'{dir1}temp')
     except:
-        for filename in os.listdir(f'{dir1}temp/'):
-            os.remove(filename)
+        try:
+            for filename in os.listdir(f'{dir1}temp/'):
+                try:
+                    os.remove(filename)
+                except Exception as e:
+                    print(e)
+        except Exception as e:
+            print(e)
+    try:
         os.rmdir(f'{dir1}temp')
+    except Exception as e:
+        print(e)
     
-    update_1 = False
     """
     Full metrics backtesting 
     """
-    update_full = True
+    sync_publish('progressString', 'Entire duration backtesting' ,'optuna')
+            
     full_metrics_dict = {}
     if not os.path.exists(f'{dir1}temp'):
         os.mkdir(f'{dir1}temp')
-    if not os.path.exists('./storage/charts/jesse-optuna'):
-        os.mkdir('./storage/charts/jesse-optuna')
+    if not os.path.exists('./storage/charts/optuna'):
+        os.mkdir('./storage/charts/optuna')
     if missing_files:
         with parallel:
             parallel(delayed(full_metrics_func)(dir1,best_trial, Interval_start, Interval_end, cfg)
@@ -890,23 +943,31 @@ def analysis(study,save_time=False):
                 except Exception as e:
                     print(e)
         for filename in os.listdir(f"{dir1}temp/"):
-            if filename.endswith(".pkl") and file != f'removed_candidates.pkl':
-                with open(f'{dir1}temp/{filename}', 'rb') as f:
-                    temp_trial_num = filename.split('.')[0]
-                    full_metrics_dict[f"{temp_trial_num}"] = pickle.load(f)
-                os.remove(f'{dir1}temp/{filename}')
+            try:
+                if filename.endswith(".pkl") and file != f'removed_candidates.pkl':
+                    with open(f'{dir1}temp/{filename}', 'rb') as f:
+                        temp_trial_num = filename.split('.')[0]
+                        full_metrics_dict[f"{temp_trial_num}"] = pickle.load(f)
+                    os.remove(f'{dir1}temp/{filename}')
+            except Exception as e:
+                print(e)
         for file in os.listdir(dir1):
             if file != f'removed_candidates.pkl':
                 file = f"{dir1}{file}"
                 if os.path.getsize(file) < (100):
-                    os.remove(file)
-    os.rmdir(f'{dir1}temp')
+                    try:
+                        os.remove(file)
+                    except Exception as e:
+                        print(e)
+    try:
+        os.rmdir(f'{dir1}temp')
+    except Exception as e:
+        print(e)
     
-    update_full = False
     """
     Filtering Results
     """
-    update_filt = True
+    sync_publish('progressString', 'Filtering results' ,'optuna')
     
     if missing_files: 
         sorted_path =  f"{dir1}final-trial:*.csv"
@@ -961,15 +1022,17 @@ def analysis(study,save_time=False):
                     if any(str(elem) in [trial_num_str] for elem in output_df['trial_number'].tolist()):
                         continue 
                     else:
-                        os.remove(filename)
+                        try:
+                            os.remove(filename)
+                        except Exception as e:
+                            print(e)
             except IndexError:
                 continue
                 
-        update_filt = False
         """
         Robust Parameter Testing
         """
-        update_2 = True
+        sync_publish('progressString', 'Parameter deviation backtesting' ,'optuna')
           
         output_df = output_df.sort_values(by=['smart_sharpe_mean'],axis=0,ascending=[True],ignore_index=True)     
         output_df = output_df.iloc[:,1:]
@@ -1007,28 +1070,27 @@ def analysis(study,save_time=False):
             parallel(delayed(random_params_func)(dir1, output_df, full_metrics_dict,cfg,index)
                 for index in range(0,len(sorted_candidate_trial_list)))
             
-        update_2 = False
                     
         """
         Random Pairs Testing
         """ 
-        update_4 = True
+        sync_publish('progressString', 'Random pair backtesting' ,'optuna')
         
         with parallel:
             parallel(delayed(random_pairs_func)(dir1, output_df, cfg, index, sorted_candidate_trial_list)
                      for index in range(len(sorted_candidate_trial_list)))
         
-        update_4 = False
 
         """
         Multiple Timeframe Testing and Final Formatting
         """
         
-        update_3 = True
+        sync_publish('progressString', 'Multiple timeframe backtesting' ,'optuna')
         
         from jesse.config import config as jesse_config
         
-        jesse_config['env']['simulation']['skip'] = False
+        if jesse_config['env']['simulation']['skip'] == True:
+            jesse_config['env']['simulation']['skip'] = False
 
         with parallel:
             parallel(delayed(multiple_timeframes_func)(dir1, output_df, cfg, index, sorted_candidate_trial_list)
@@ -1036,21 +1098,16 @@ def analysis(study,save_time=False):
             
         jesse_config['env']['simulation']['skip'] = True
         
-        update_3 = False 
     
     """
     QuantStat Reports
     """
     
-    final_update = True  
-    
-    # moved to multiple_timeframes_func
-    # parallel(delayed(quant_func)(dir1,best_trial,Interval_start,Interval_end,cfg,run_silently=False)
-        # for best_trial in sorted_candidate_trial_list)   
+    sync_publish('progressString', 'Producing Optuna visualizations' ,'optuna')
         
-    for chart in os.listdir('./storage/charts/jesse-optuna/'):
+    for chart in os.listdir('./storage/charts/optuna/'):
         try:
-            os.remove(f'./storage/charts/jesse-optuna/{chart}')
+            os.remove(f'./storage/charts/optuna/{chart}')
         except:
             continue
     for chart in os.listdir('./storage/charts/'):
@@ -1069,49 +1126,53 @@ def analysis(study,save_time=False):
     importance = optuna.importance.get_param_importances(
         study, target= lambda t: t.values[0], evaluator=FanovaImportanceEvaluator()
     )
-    
-    try:
-        if cfg['mode'] == 'multi': 
-            fig1 = optuna.visualization.plot_pareto_front(study, targets=lambda t: (t.values[0], t.values[1]), target_names= [cfg['fitness-ratio1'], cfg['fitness-ratio2']])
-        else: 
-            fig1 = optuna.visualization.plot_pareto_front(study)
-        fig1.show()
-    except Exception as e:
-        print(e)
-        pass
-    try:
-        fig2 = optuna.visualization.plot_optimization_history(study, target= lambda t: t.values[0])
-        fig2.show()
-    except Exception as e:
-        print(e)
-        pass
-    try: 
-        fig5 = optuna.visualization.plot_contour(study, target= lambda t: t.values[0])
-        fig5.show()
-    except Exception as e:
-        print(e)
-        pass
-    try:
-        fig3 = optuna.visualization.plot_param_importances(study, target= lambda t: t.values[0])
-        fig3.show()
-    except Exception as e:
-        print(e)
-        pass
-    try:
-        fig4 = optuna.visualization.plot_slice(study, target= lambda t: t.values[0])
-        fig4.show()
-    except Exception as e:
-        print(e)
-        pass
-    done = True
-    t.join()
-    
-    print(f'Parameter Importance: {importance}\n')
-    
-    _text = Fore.MAGENTA + Style.BRIGHT + f"\n files are stored in C:/Python39/Algotrading{dir1}"
-    print(_text)
-    _text = Style.RESET_ALL + '\n '
-    print(_text)
+    print(f'Optuna Param Importance: {importance}')
+    if cfg['optuna_visualizations']:
+        try:
+            if cfg['mode'] == 'multi': 
+                fig1 = optuna.visualization.plot_pareto_front(study, targets=lambda t: (t.values[0], t.values[1]), target_names= [cfg['fitness-ratio1'], cfg['fitness-ratio2']])
+            else: 
+                fig1 = optuna.visualization.plot_pareto_front(study)
+            fig1.show()
+        except Exception as e:
+            print(e)
+            pass
+        try:
+            fig2 = optuna.visualization.plot_optimization_history(study, target= lambda t: t.values[0])
+            fig2.show()
+        except Exception as e:
+            print(e)
+            pass
+        try: 
+            fig5 = optuna.visualization.plot_contour(study, target= lambda t: t.values[0])
+            fig5.show()
+        except Exception as e:
+            print(e)
+            pass
+        try:
+            fig3 = optuna.visualization.plot_param_importances(study, target= lambda t: t.values[0])
+            fig3.show()
+        except Exception as e:
+            print(e)
+            pass
+        try:
+            fig4 = optuna.visualization.plot_slice(study, target= lambda t: t.values[0])
+            fig4.show()
+        except Exception as e:
+            print(e)
+            pass
+        try:
+            fig5 = optuna.visualization.plot_parallel_coordinate(study, target= lambda t: t.values[0])
+            fig5.show()
+        except Exception as e:
+            print(e)
+            pass
+        try:
+            fig6 = optuna.visualization.plot_timeline(study)
+            fig6.show()
+        except Exception as e:
+            print(e)
+            pass
 
 def uniq(lst):
     last = object()
@@ -1120,15 +1181,7 @@ def uniq(lst):
             continue
         yield item
         last = item
-    
-# def quant_func(dir1,best_trial,Interval_start,Interval_end,cfg,run_silently=False):  
-    # params =  best_trial.params
-    # trial_num = int(best_trial.number)
-    # path_name = get_file_names_with_strings(dir1,[str(trial_num)])
-    # path_name = path_name[0]
-    # path_name = path_name.rsplit('-',11)[0]
-    # get_quantreports = optuna_backtest_function_quant(Interval_start,Interval_end,params,cfg,run_silently=False,trial_num=trial_num,imported_string=path_name)
-        
+     
 def get_file_names_with_strings(dir1,str_list):
     full_list = os.listdir(f'{dir1}')
     final_list = [nm for ps in str_list for nm in full_list if ps in nm]
@@ -1742,7 +1795,7 @@ def openpyxl_formating(df,base_filename,trial_num,cfg):
     # chart2.dataLabels.showVal = True
     ws.add_chart(chart4, f"{letter3}23")
     try:
-        png_loc = f'./storage/charts/jesse-optuna/{trial_num}-chart.png'
+        png_loc = f'./storage/charts/optuna/{trial_num}-chart.png'
         my_png = Image(png_loc)
         ws.add_image(my_png, f'{letter}50')
     except Exception as e:
@@ -1893,6 +1946,13 @@ def fixed_red_colorshade(value,min_value,max_value):
             break
     return col 
 
+def safe_remove(file_path):
+    try:
+        os.remove(file_path)
+    except Exception as e:
+        pass
+
+
 def fixed_green_colorshade(value,min_value,max_value):
     #list accidently reversed 
     col_list = ["003300","004100","004F00","005D00","006B00","007900","008600","009400","00A200","00B000","00BE00","00CC00"]
@@ -1999,8 +2059,8 @@ def multiple_timeframes_func(dir1, output_df, cfg, index, sorted_candidate_trial
         chart = full_metrics_['charts']
     # equity_curve = full_metrics_['equity_curve']
     # TODO: Create a saved graph form the equity curve data
-    # path1 = f'./storage/charts/jesse-optuna/{best_trial.number}-equity_curve.png'
-        path2 = f'./storage/charts/jesse-optuna/{trial_num_str}-chart.png'
+    # path1 = f'./storage/charts/optuna/{best_trial.number}-equity_curve.png'
+        path2 = f'./storage/charts/optuna/{trial_num_str}-chart.png'
         os.rename(chart,path2)
     except Exception as e: 
         print(f'unable to create quantstat data for {trial_num_str}')
@@ -2034,11 +2094,14 @@ def random_params_func(dir1,output_df,full_metrics_dict,cfg,index):
     Interval_start = cfg['Interval_start']
     Interval_end = cfg['Interval_end']
     for f in os.listdir(dir1):
-        filename_str = f.split(':')[1]
-        trial_num_str = str(filename_str.split('-')[0])
-        if trial_num_str == str(output_df.iloc[index,0]):
-            filename = f"{dir1}{f}"    
-            break
+        try:
+            filename_str = f.split(':')[1]
+            trial_num_str = str(filename_str.split('-')[0])
+            if trial_num_str == str(output_df.iloc[index,0]):
+                filename = f"{dir1}{f}"    
+                break
+        except Exception as e:
+            print(e)
     index = output_df[output_df.iloc[:,0].str.contains(trial_num_str)].index.values
     try:
         _sharpe_mean = str(round(float(output_df.iloc[index,1].values),2))
@@ -2675,7 +2738,7 @@ def objective(trial):
         else:
             raise ValueError(
                 f'The entered ratio2 configuration `{ratio_config2}` for the optimization is unknown. Choose between Sharpe, Calmar, Sortino, Serenity, smart shapre, SmartSortino and Omega.')
-        if ratio2 < 0 and cfg['dual_mode'] == 'maximize':
+        if ratio2 < 0 and cfg['dual_mode'] == 'Maximize':
             raise optuna.TrialPruned()
         score2 = total_effect_rate * ratio_normalized2
         trial.set_user_attr(f"training_score_2", score2)
@@ -2690,9 +2753,14 @@ def objective(trial):
         
     #constraints_violation must be negative to proceed. Only used for NSGAIISampler and TPESampler
     if cfg['optimizer'] in ['NSGAIISampler', 'TPESampler']:
-        constraints_violation1 = (-1*testing_data_metrics['omega_ratio'])+0.85
-        constraints_violation2 = -1*testing_data_metrics['kelly_criterion']
-        trial.set_user_attr("constraint", (constraints_violation1,constraints_violation2))
+        omega_ratio = testing_data_metrics['omega_ratio']
+        kelly_criterion = testing_data_metrics['kelly_criterion']
+        if math.isnan(omega_ratio) or math.isnan(kelly_criterion):
+            pass
+        else:
+            constraints_violation1 = (-1 * omega_ratio) + 0.85
+            constraints_violation2 = -1 * kelly_criterion
+            trial.set_user_attr("constraint", (constraints_violation1, constraints_violation2))
         # print(constraints_violation1)
         # print(constraints_violation2)
     
@@ -2786,7 +2854,7 @@ def objective(trial):
         else:
             raise ValueError(
                 f'The entered ratio2 configuration `{ratio_config2}` for the optimization is unknown. Choose between Sharpe, Calmar, Sortino, Serenity, smart shapre, SmartSortino and Omega.')
-        if testing_ratio_normalized2 < (-(ratio_normalized2/5)) and cfg['dual_mode'] == 'maximize':
+        if testing_ratio_normalized2 < (-(ratio_normalized2/5)) and cfg['dual_mode'] == 'Maximize':
             raise optuna.TrialPruned()
         testing_score_2 = testing_total_effect_rate * testing_ratio_normalized2
         trial.set_user_attr(f"testing_score_2", testing_score_2)
@@ -2807,8 +2875,8 @@ def objective(trial):
         testing_data_metrics['parameters'] = trial.params
         testing_data_metrics['pairs'] = pairs
         testing_results_df = pd.DataFrame.from_dict(testing_data_metrics.items(), orient='columns')  
-        train_temp_path = f"./storage/jesse-optuna/training_metrics/"
-        test_temp_path = f"./storage/jesse-optuna/testing_metrics/"
+        train_temp_path = f"./storage/optuna/training_metrics/"
+        test_temp_path = f"./storage/optuna/testing_metrics/"
         train_path = f"{cfg['strategy_name']}-{cfg['route'][0]['exchange']}-{cfg['type']}-{cfg['route'][0]['symbol']}-{cfg['route'][0]['timeframe']}-{cfg['timespan-train']['start_date']}-{cfg['timespan-train']['finish_date']}-{cfg['optimizer']}-{len(cfg['route'])} Pair"
         test_path = f"{cfg['strategy_name']}-{cfg['route'][0]['exchange']}-{cfg['type']}-{cfg['route'][0]['symbol']}-{cfg['route'][0]['timeframe']}-{cfg['timespan-train']['start_date']}-{cfg['timespan-train']['finish_date']}-{cfg['optimizer']}-{len(cfg['route'])} Pair"
         
@@ -2873,18 +2941,18 @@ def validate_cwd() -> None:
 
 
 def get_candles_with_cache(exchange: str, symbol: str, start_date: str, finish_date: str) -> np.ndarray:
-    path = pathlib.Path('storage/jesse-optuna/candle_storage/')
+    path = pathlib.Path('storage/optuna/candle_storage/')
     path.mkdir(parents=True, exist_ok=True)
 
     cache_file_name = f"{exchange}-{symbol}-1m-{start_date}-{finish_date}.pickle"
-    cache_file = pathlib.Path(f'storage/jesse-optuna/candle_storage/{cache_file_name}')
+    cache_file = pathlib.Path(f'storage/optuna/candle_storage/{cache_file_name}')
 
     if cache_file.is_file():
-        with open(f'storage/jesse-optuna/candle_storage/{cache_file_name}', 'rb') as handle:
+        with open(f'storage/optuna/candle_storage/{cache_file_name}', 'rb') as handle:
             candles = pickle.load(handle)
     else:
         candles = get_candles(exchange, symbol, '1m', start_date, finish_date)
-        with open(f'storage/jesse-optuna/candle_storage/{cache_file_name}', 'wb') as handle:
+        with open(f'storage/optuna/candle_storage/{cache_file_name}', 'wb') as handle:
             pickle.dump(candles, handle, protocol=pickle.HIGHEST_PROTOCOL)
     
     return candles

@@ -411,7 +411,14 @@ async def optuna(
             request_json.swapping_prob,
             request_json.qmc_type,
             request_json.scramble,
-            request_json.n_trials
+            request_json.n_trials,
+            request_json.do_analysis,
+            request_json.validation_interval,
+            request_json.robust_test_iteration_count,
+            request_json.robust_test_max,
+            request_json.robust_test_min,
+            request_json.max_final_number_of_validation_results,
+            request_json.optuna_visualizations
         )
         
         return JSONResponse({'message': 'Started optuna...'}, status_code=202)
