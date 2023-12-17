@@ -88,9 +88,11 @@ def stock_candles_func(ticker, start_date, finish_date,exchange):
     return out
 
 @njit
-def generate_candle_from_one_minutes(timeframe: str,
+def generate_candle_from_one_minutes(
                                      candles ,
                                      accept_forming_candles:bool = False) :
+                                     
+         
     return np.array([
         candles[0][0],
         candles[0][1],
@@ -110,36 +112,6 @@ def reinsert_nan(array, nan_indices):
         array = np.concatenate((array[:nan_indices[i]], [np.nan], array[nan_indices[i]:]))
     return array
     
-# def monte_carlo_candles(candles):
-    # import pandas as pd 
-    # import pandas_montecarlo 
-    # import random 
-    # randomnum = (random.randint(2,100))
-    # df = numpy_candles_to_dataframe(candles)
-    # close = df['close'].montecarlo(sims=100)
-    # close = pd.DataFrame(close.data[[randomnum]])
-    # open = df['open'].montecarlo(sims=100)
-    # open = pd.DataFrame(open.data[[randomnum]])
-    # low = df['low'].montecarlo(sims=100)
-    # low = pd.DataFrame(low.data[[randomnum]])
-    # high = df['high'].montecarlo(sims=100)
-    # high = pd.DataFrame(high.data[[randomnum]])
-    # volume = df['volume'].montecarlo(sims=100)
-    # volume = pd.DataFrame(volume.data[[randomnum]])
-
-    # close = close.to_numpy()
-    # high = high.to_numpy()
-    # low = low.to_numpy()
-    # open = open.to_numpy()
-    # volume = volume.to_numpy()
-    # print(close[-10:])
-    
-    # open = np.ravel(open[:,0])
-    # close = np.ravel(close[:,0])
-    # high = np.ravel(high[:,0])
-    # low = np.ravel(low[:,0])
-
-    # return  open, close, high, low 
     
 @njit
 def monte_carlo_simulation(candles, price_deviation_factor=0.005, volume_factor=0.1):
@@ -176,5 +148,3 @@ def monte_carlo_simulation(candles, price_deviation_factor=0.005, volume_factor=
 
     return modified_candles
 
-
- 

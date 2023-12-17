@@ -1,4 +1,4 @@
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, Union
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -77,11 +77,30 @@ class OptunaRequestJson(BaseModel):
     qmc_type: str
     scramble: bool
     n_trials: int
+    do_analysis: bool
+    validation_interval: int
+    robust_test_iteration_count: int
+    robust_test_max: float
+    robust_test_min: float
+    max_final_number_of_validation_results: int
+    optuna_visualizations: bool
 
 class OptunaSpecialRequestJson(BaseModel):
     id: str
     string: str
-
+    
+class HyperparametersSendingRequestJson(BaseModel):
+    id: str
+    current_page: str
+    strategy_name: str
+    
+HyperparameterValue = Union[int, float, str]
+class HyperparametersSavingRequestJson(BaseModel):
+    id: str
+    current_page: str
+    strategy_name: str
+    hyperparameters: Dict[str, HyperparameterValue]
+    
 class ImportCandlesRequestJson(BaseModel):
     id: str
     exchange: str

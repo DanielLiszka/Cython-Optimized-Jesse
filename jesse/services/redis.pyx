@@ -37,7 +37,7 @@ def sync_publish(event: str, msg, mode: str = None,id = None):
     else:
         event_info = jh.app_mode()
         id = os.getpid()
-        
+    #print(f'id: {id} event: {event_info}-{event}  data: {msg}')
     sync_redis.publish(
         f"{ENV_VALUES['APP_PORT']}:channel:1", json.dumps({
             'id': id,

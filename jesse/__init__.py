@@ -13,7 +13,7 @@ from jesse.services import auth as authenticator
 from jesse.services.redis import async_redis, async_publish, sync_publish
 from jesse.services.web import fastapi_app, BacktestRequestJson, ImportCandlesRequestJson, CancelRequestJson, \
     LoginRequestJson, ConfigRequestJson, LoginJesseTradeRequestJson, NewStrategyRequestJson, FeedbackRequestJson, \
-    ReportExceptionRequestJson, OptimizationRequestJson, OptunaRequestJson, OptunaSpecialRequestJson
+    ReportExceptionRequestJson, OptimizationRequestJson, OptunaRequestJson, OptunaSpecialRequestJson, HyperparametersSavingRequestJson, HyperparametersSendingRequestJson
 import uvicorn
 from asyncio import Queue
 import jesse.helpers as jh
@@ -263,6 +263,43 @@ def cancel_import_candles(request_json: CancelRequestJson, authorization: Option
     process_manager.cancel_process('candles-' + request_json.id)
 
     return JSONResponse({'message': f'Candles process with ID of {request_json.id} was requested for termination'}, status_code=202)
+
+@fastapi_app.post("/strategy-hyperparameters")
+def hyperparameters_sending(request_json: HyperparametersSendingRequestJson, authorization: Optional[str] = Header(None)):
+    from jesse.services.multiprocessing_module import process_manager
+
+    if not authenticator.is_valid_token(authorization):
+        return authenticator.unauthorized_response()
+ 
+    from jesse.modes.strategy_editing import hyperparameters_editing
+
+    process_manager.add_task(
+        hyperparameters_editing,
+        'backtest-' + str(request_json.current_page),
+        request_json.strategy_name,
+        request_json.current_page
+    )
+    
+    return JSONResponse({'message': 'Retrieved Hyperparameters...'}, status_code=202)
+
+
+@fastapi_app.put("/strategy-hyperparameters")
+def hyperparameters_saving(request_json: HyperparametersSavingRequestJson, authorization: Optional[str] = Header(None)):
+    from jesse.services.multiprocessing_module import process_manager
+
+    if not authenticator.is_valid_token(authorization):
+        return authenticator.unauthorized_response()
+ 
+    from jesse.modes.strategy_editing import update_hyperparameters_from_json
+
+    process_manager.add_task(
+        update_hyperparameters_from_json,
+        'backtest-' + str(request_json.current_page),
+        request_json.strategy_name,
+        request_json.hyperparameters
+    )
+    
+    return JSONResponse({'message': 'Sent Hyperparameters...'}, status_code=202)
 
 
 @fastapi_app.post("/backtest")
