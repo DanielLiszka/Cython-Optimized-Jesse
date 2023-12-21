@@ -33,3 +33,4 @@ ruuid==0.3.0
 pythran==0.14.0
 polygon==0.7.0
 polygon-api-client==0.2.11
+autopep8==2.0.4

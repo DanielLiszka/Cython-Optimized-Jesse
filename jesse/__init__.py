@@ -13,7 +13,8 @@ from jesse.services import auth as authenticator
 from jesse.services.redis import async_redis, async_publish, sync_publish
 from jesse.services.web import fastapi_app, BacktestRequestJson, ImportCandlesRequestJson, CancelRequestJson, \
     LoginRequestJson, ConfigRequestJson, LoginJesseTradeRequestJson, NewStrategyRequestJson, FeedbackRequestJson, \
-    ReportExceptionRequestJson, OptimizationRequestJson, OptunaRequestJson, OptunaSpecialRequestJson, HyperparametersSavingRequestJson, HyperparametersSendingRequestJson
+    ReportExceptionRequestJson, OptimizationRequestJson, OptunaRequestJson, OptunaSpecialRequestJson, HyperparametersSavingRequestJson, HyperparametersSendingRequestJson, \
+    CodeSendingRequestJson
 import uvicorn
 from asyncio import Queue
 import jesse.helpers as jh
@@ -282,7 +283,44 @@ def hyperparameters_sending(request_json: HyperparametersSendingRequestJson, aut
     
     return JSONResponse({'message': 'Retrieved Hyperparameters...'}, status_code=202)
 
+@fastapi_app.get("/code-receiving")
+def code_receiving(strategy_name:str, authorization: Optional[str] = Header(None)) -> JSONResponse:
+    if not authenticator.is_valid_token(authorization):
+        return authenticator.unauthorized_response()
+ 
+    from jesse.modes.strategy_editing import code_receiving
 
+    try:
+        data = code_receiving(strategy_name)
+    except Exception as e:
+        return JSONResponse({
+            'error': str(e)
+        }, status_code=500)
+
+    return JSONResponse(
+        data,
+        status_code=200
+    )
+
+@fastapi_app.post("/code-receiving")
+def code_receiving(request_json: CodeSendingRequestJson, authorization: Optional[str] = Header(None)) -> JSONResponse:
+    if not authenticator.is_valid_token(authorization):
+        return authenticator.unauthorized_response()
+ 
+    from jesse.modes.strategy_editing import code_saving
+    try:
+        data = code_saving(request_json.strategy_name,request_json.code)
+    except Exception as e:
+        print(e)
+        return JSONResponse({
+            'error': str(e)
+        }, status_code=500)
+
+    return JSONResponse(
+        data,
+        status_code=200
+    )
+    
 @fastapi_app.put("/strategy-hyperparameters")
 def hyperparameters_saving(request_json: HyperparametersSavingRequestJson, authorization: Optional[str] = Header(None)):
     from jesse.services.multiprocessing_module import process_manager

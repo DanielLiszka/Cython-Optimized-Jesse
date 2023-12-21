@@ -89,6 +89,10 @@ class OptunaSpecialRequestJson(BaseModel):
     id: str
     string: str
     
+class CodeSendingRequestJson(BaseModel):
+    strategy_name: str
+    code: str
+    
 class HyperparametersSendingRequestJson(BaseModel):
     id: str
     current_page: str

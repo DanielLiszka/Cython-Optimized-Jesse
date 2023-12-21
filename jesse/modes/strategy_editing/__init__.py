@@ -4,7 +4,10 @@ import importlib
 import sys
 import re
 import ast 
-import astor 
+import os 
+import subprocess
+from pydantic import BaseModel
+import autopep8
 
 def convert_hyperparameters_for_json(hyperparameters):
     json_ready_hyperparameters = []
@@ -29,10 +32,10 @@ def hyperparameters_editing(strategy_name, event_info: int):
         hyperparameters = strategy_instance.hyperparameters()
         json_ready_hyperparameters = [convert_hyperparameters_for_json(hyperparameters), event_info]
         sync_publish('shownHyperparameters', json_ready_hyperparameters, 'backtest')
-        print(json_ready_hyperparameters)
     except Exception as e: 
         print('Failed to Retrieve Strategy hyperparameters')
         print(e)
+        sync_publish('shownHyperparameters', '', 'backtest')
         
 def preprocess_hyperparameters(updated_hyperparameters):
     for param, value in updated_hyperparameters.items():
@@ -62,10 +65,62 @@ class HyperparameterTransformer(ast.NodeTransformer):
                                     elif isinstance(new_value, bool):
                                         v.value = ast.NameConstant(new_value)
                                     elif isinstance(new_value, (int, float)) and k.get('type', None) == 'bool':
-                                        # Convert numeric to boolean
                                         v.value = ast.NameConstant(bool(new_value))
 
         return node
+        
+def code_receiving(strategy_name):
+    try:
+        strategy_path = f'strategies/{strategy_name}/__init__.py'  
+        with open(strategy_path, 'r') as file:
+            content = file.read()
+        return content
+    except Exception as e: 
+        print(e)
+        pass
+
+def compile_code(code):
+    try:
+        compile(code, "<string>", "exec")
+        return True, ""
+    except SyntaxError as e:
+        return False, str(e)
+
+def lint_code(code, filename='temp_code.py'):
+    with open(filename, 'w') as file:
+        file.write(code)
+    result = subprocess.run(['flake8', filename], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    os.remove(filename)
+    return result.stdout.decode('utf-8')
+
+def format_code_with_autopep8(code):
+    """Format code using autopep8."""
+    return autopep8.fix_code(code, options={'aggressive': 1})
+
+def code_saving(strategy_name, code):
+    file_path = f'strategies/{strategy_name}/__init__.py'
+    is_valid, error = compile_code(code)
+    if not is_valid:
+        return f"Syntax error: {error}"
+    formatted_code = format_code_with_autopep8(code)
+    try:
+        os.makedirs(os.path.dirname(file_path), exist_ok=True)
+        with open(file_path, 'w') as file:
+            file.write(formatted_code)
+        return "success"
+    except Exception as e:
+        return f"Error saving file: {str(e)}"   
+
+def format_dict_list(node):
+    for i, dict_ in enumerate(node.elts):
+        if isinstance(dict_, ast.Dict):
+            formatted_pairs = []
+            for key, value in zip(dict_.keys, dict_.values):
+                key_str = ast.unparse(key)
+                value_str = ast.unparse(value)
+                formatted_pairs.append(f"{key_str}: {value_str}")
+            node.elts[i] = ast.parse("{" + ",\n".join(formatted_pairs) + "}")
+
 
 def update_hyperparameters_from_json(strategy_name, updated_hyperparameters):
     preprocess_hyperparameters(updated_hyperparameters)
@@ -74,15 +129,13 @@ def update_hyperparameters_from_json(strategy_name, updated_hyperparameters):
             try:
                 updated_hyperparameters[key] = float(value)
             except ValueError:
-                pass  # Handle or log error if necessary
-    # Convert string representations of booleans to actual boolean values
+                pass
     for key, value in updated_hyperparameters.items():
         if isinstance(value, str) and value.lower() in ['true', 'false']:
             updated_hyperparameters[key] = value.lower() == 'true'
 
     file_path = f'strategies/{strategy_name}/__init__.py'
     original_content = None
-    print(updated_hyperparameters)
     try:
         with open(file_path, 'r') as file:
             original_content = file.read()
@@ -90,7 +143,12 @@ def update_hyperparameters_from_json(strategy_name, updated_hyperparameters):
         transformer = HyperparameterTransformer(updated_hyperparameters)
         transformer.visit(tree)
 
-        # Using ast.unparse to convert AST back to source code
+        for node in ast.walk(tree):
+            if isinstance(node, ast.FunctionDef) and node.name == 'hyperparameters':
+                for child in ast.iter_child_nodes(node):
+                    if isinstance(child, ast.Return) and isinstance(child.value, ast.List):
+                        format_dict_list(child.value)
+
         modified_code = ast.unparse(tree)
 
         with open(file_path, 'w') as file:
