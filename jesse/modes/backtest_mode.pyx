@@ -22,7 +22,7 @@ ctypedef double dtype_t
 ctypedef np.float64_t DTYPE_t
 import pandas as pd
 import random
-
+import matplotlib.pyplot as plt
 # def uuid4():
   # s = '%032x' % random.getrandbits(128)
   # return s[0:8]+'-'+s[8:12]+'-4'+s[13:16]+'-'+s[16:20]+'-'+s[20:32]
@@ -139,8 +139,8 @@ def run(
         # routes info
         sync_publish('routes_info', stats.routes(router.routes))
         
-    if router.routes[0].timeframe == '1m': # or router.routes[0].timeframe == '2m':
-        config['env']['simulation']['skip'] = False
+    #if router.routes[0].timeframe == '1m': # or router.routes[0].timeframe == '2m':
+        #config['env']['simulation']['skip'] = False
     # run backtest simulation
     result = simulator(
         candles,
@@ -305,7 +305,9 @@ def load_candles(start_date_str: str, finish_date_str: str) -> Dict[str, Dict[st
     return candles
 
 def simulator(*args, **kwargs):	
-    if jh.get_config('env.simulation.skip'):
+    if jh.get_config('env.simulation.fast'):
+        result = fast_simulator(*args, **kwargs)
+    elif jh.get_config('env.simulation.skip'):
         result = skip_simulator(*args, **kwargs)
     else:
         result = iterative_simulator(*args, **kwargs)	
@@ -651,6 +653,7 @@ def indicator_precalculation(dict candles,double [:,::1] first_candles_set,strat
     indicator6, indicator7, indicator8, indicator9,indicator10 
     cdef double[::1] gen_candles
     cdef tuple timeframe_tuple = config['app']['considering_timeframes']
+    cdef tuple trading_timeframe_tuple = config['app']['trading_timeframes']
     cdef bint other_tf = False
     # cdef double [:,::1] new_array, date_index
     # cdef np.ndarray new_array
@@ -670,6 +673,7 @@ def indicator_precalculation(dict candles,double [:,::1] first_candles_set,strat
     indicator9_storage = {}
     indicator10_storage = {}
     router_list = []
+    #print(trading_timeframe_tuple)
     if router.extra_candles:
         for r in router.extra_candles:
             key = f"{r['exchange']}-{r['symbol']}-{r['timeframe']}"
@@ -702,7 +706,8 @@ def indicator_precalculation(dict candles,double [:,::1] first_candles_set,strat
                 if min_timeframe == '1m':
                     if preload_candles and skip_1m and not stock_prices:
                         store.candles.storage[key].array = new_array
-                continue
+                if not '1m' in trading_timeframe_tuple:
+                    continue
             _partial_array = np.zeros((int(length/(consider_timeframes))+1,6))   
             partial_date_array = np.zeros((int(length/(consider_timeframes))+1,1))   
             index = 0
@@ -1246,13 +1251,14 @@ def initialized_strategies(hyperparameters: dict = None):
     # search for minimum timeframe for skips
     consider_timeframes = [jh.timeframe_to_one_minutes(timeframe) for timeframe in
                            config['app']['considering_timeframes'] if timeframe != '1m']
+    trading_timeframes = config['app']['trading_timeframes']
     # smaller timeframe is dividing DAY_1 & I down want bigger timeframe to be the skipper
     # because it fast enough with 1 day + higher timeframes are better to check every day ( 1M / 1W / 3D )
     #if timeframes.DAY_1 not in consider_timeframes:
         #consider_timeframes.append(jh.timeframe_to_one_minutes(timeframes.DAY_1))
     # for cases where only 1m is used in this simulation
-    if consider_timeframes == []:
-        return 1
+    if consider_timeframes == [] or '1m' in trading_timeframes:
+        return 1,r.strategy
     # take the greatest common divisor for that purpose
     return np.gcd.reduce(consider_timeframes),r.strategy
 
@@ -1649,3 +1655,301 @@ cdef _simulate_price_change_effect_skip(double[::1] real_candle, str exchange, s
             
 
     # _check_for_liquidations(real_candle, exchange, symbol)
+    
+
+        
+def fast_simulator(candles: dict,
+        run_silently: bool,
+        hyperparameters: dict = None,
+        generate_charts: bool = False,
+        generate_tradingview: bool = False,
+        generate_quantstats: bool = False,
+        generate_backtesting_chart: bool = False,
+        generate_correlation_table: bool = False,
+        generate_csv: bool = False,
+        generate_json: bool = False,
+        generate_equity_curve: bool = False,
+        generate_hyperparameters: bool = False,
+        start_date: str = None,
+        finish_date: str = None,
+        full_path_name: str= None,
+        full_name: str = None
+) -> dict:
+    import json
+    import time
+    from datetime import datetime, timezone
+    start = time.time()
+    result = {}
+    cdef Py_ssize_t i, j 
+    cdef int count, length, min_timeframe,min_timeframe_remainder, candle_prestorage_shape, consider_timeframes, fed_candles_length
+    cdef double[:,::1] _first_candles_set
+    cdef double [:] memview_fed_candles, indicator1, indicator2 
+    cdef np.ndarray open_positions, close_positions,positions,balances, sell_values
+    cdef np.ndarray fed_candles,full_candle_storage
+    
+    key = f"{config['app']['considering_candles'][0][0]}-{config['app']['considering_candles'][0][1]}"
+    first_candles_set = candles[key]['candles']
+    length = len(first_candles_set)
+    store.app.starting_time = first_candles_set[0][0]
+    store.app.time = first_candles_set[0][0]
+    min_timeframe, strategy = initialized_strategies(hyperparameters)
+    if full_path_name and full_name:
+        strategy.full_path_name = full_path_name
+        strategy.full_name = full_name
+
+    dic = {
+        timeframes.MINUTE_1: 1,
+        timeframes.MINUTE_2 : 2,
+        timeframes.MINUTE_3: 3,
+        timeframes.MINUTE_5: 5,
+        timeframes.MINUTE_10 : 10,
+        timeframes.MINUTE_15: 15,
+        timeframes.MINUTE_30: 30,
+        timeframes.MINUTE_45: 45,
+        timeframes.HOUR_1: 60,
+        timeframes.HOUR_2: 60 * 2,
+        timeframes.HOUR_3: 60 * 3,
+        timeframes.HOUR_4: 60 * 4,
+        timeframes.HOUR_6: 60 * 6,
+        timeframes.HOUR_8: 60 * 8,
+        timeframes.HOUR_12: 60 * 12,
+        timeframes.DAY_1: 60 * 24,
+    }
+    
+    inv_dic = {v: k for k, v in dic.items()}
+
+    _first_candles_set = first_candles_set
+    for r in router.routes:
+        StrategyClass = r.strategy_name
+    StrategyClass = jh.get_strategy_class(StrategyClass)
+    
+    hp_dict = StrategyClass().hyperparameters()
+    param_grid = create_param_grid(hp_dict)
+    strategy.grid_opt = True
+    params_length = len(param_grid)
+    fed_candles,full_candle_storage,candle_prestorage_shape,consider_timeframes = _indicator_precalculation(candles,first_candles_set,strategy,True,True,min_timeframe=inv_dic[min_timeframe])
+    fed_candles = fed_candles[1:-1]
+    fed_candles_length = (fed_candles.shape[0])
+    memview_fed_candles = fed_candles[:,2]
+    #cdef int start_capital = 10000
+    cdef double size,fee,minimum,position, balance,net_profit, invest_amount,sell_value, position_price, invest_fraction, transaction_fee, start_capital
+    cdef dict new_dict = {}
+    #print(param_grid)
+    #print(params_length)
+    # print(datetime.fromtimestamp(int(fed_candles[0][0]) / 1000, tz=timezone.utc).strftime("%Y-%m-%d %H:%M"))
+    # print(datetime.fromtimestamp(int(fed_candles[-1][0]) / 1000, tz=timezone.utc).strftime("%Y-%m-%d %H:%M"))
+    # df = pd.DataFrame(fed_candles)
+    # df.to_csv('fed_candles.csv')
+
+    for i in range(params_length):
+        hp = param_grid[i]
+        indicator1, indicator2 = fast_indicator_precalculation(full_candle_storage,candle_prestorage_shape,consider_timeframes,strategy,hp)
+
+        position_price = 0 
+        position = 0
+        start_capital = 10000.0
+        fee = 0.001
+        size = 0.1
+        minimum = start_capital * 0.1
+        balance = start_capital
+        #print(np.array(indicator2_storage))
+        assert(indicator1.shape[0] == indicator2.shape[0] == memview_fed_candles.shape[0])
+        with nogil:
+            for j in range(fed_candles_length):
+                #print("Balance:", balance, "Position:", position, "Position Price:", position_price, "Current Price:", memview_fed_candles[j])
+                # Opening a position
+                if indicator1[j] > indicator2[j] and position == 0:
+                    invest_amount = balance * size - (balance * size * fee)  # investing 10% of current balance
+                    position = (invest_amount / memview_fed_candles[j])  # calculating the quantity of the asset to buy
+                    balance -= (invest_amount + invest_amount * fee)  # update balance after purchase
+                    position_price = memview_fed_candles[j]  # record entry price
+                # Closing a position
+                elif indicator1[j] < indicator2[j] and position != 0:
+                    sell_value = position * memview_fed_candles[j]  # value of the asset at current price
+                    balance += (sell_value - sell_value * fee)  # update balance with profit/loss
+                    position = 0  # reset position
+                    position_price = 0  # reset position price
+
+                if balance < minimum:
+                    break
+
+        # Calculate net profit
+        net_profit = balance - start_capital
+        #print(hp)
+        # if hp == {'Fast SMA': 50, 'Slow SMA': 200}:
+            # print(net_profit)
+            # return
+        # if net_profit > 0:
+        new_dict[str(param_grid[i])] = net_profit
+            #print(f'{param_grid[i]} - {net_profit}')
+
+    print(new_dict)
+    parsed_keys = [eval(key) for key in new_dict.keys()]
+
+    sorted_combinations = sorted(parsed_keys, key=lambda x: new_dict[str(x)], reverse=True)
+
+    # Select top-performing combinations (e.g., top 25%)
+    top_percentile = int(len(sorted_combinations) * 0.25)
+    top_combinations = sorted_combinations[:top_percentile]
+
+    # Analyze parameter ranges for top-performing combinations
+    param_ranges_top = {}
+    for key in top_combinations:
+        for param, value in key.items():
+            if param not in param_ranges_top:
+                param_ranges_top[param] = []
+            param_ranges_top[param].append(value)
+
+    # Determine new ranges
+    new_param_ranges_top = {}
+    for param, values in param_ranges_top.items():
+        new_param_ranges_top[param] = (min(values), max(values))
+
+    # Print the new ranges for top performers
+    print("New parameter ranges based on top-performing combinations:")
+    for param, range_ in new_param_ranges_top.items():
+        print(f"{param}: Range {range_}")
+        
+
+    import ast  # Import the ast module
+
+    # Initialize an empty data dictionary
+    data = {'profit': []}
+
+    # Identify all unique parameters
+    for params in new_dict.keys():
+        params_dict = ast.literal_eval(params)  # Convert string to dictionary
+        for param in params_dict.keys():
+            if param not in data:
+                data[param] = []
+
+    # Add profits to data dictionary
+    for params, profit in new_dict.items():
+        params_dict = ast.literal_eval(params)
+        for param, value in params_dict.items():
+            data[param].append(value)
+        data['profit'].append(profit)
+
+    df = pd.DataFrame(data)
+
+    # Plotting for each parameter
+    unique_params = set(df.columns) - {'profit'}
+    for param in unique_params:
+        avg_profit = df.groupby(param)['profit'].mean()
+        plt.figure()
+        avg_profit.plot(kind='bar' if len(avg_profit) < 20 else 'line')
+        plt.title(f"Average Profit by {param}")
+        plt.ylabel("Average Profit")
+        plt.xlabel(param)
+        plt.savefig(f'plot_{param}.png')  # Save the plot as an image file
+        plt.close() 
+            
+    end = time.time()
+    print(end-start)
+    return result
+    
+    
+import itertools
+import json 
+
+def create_param_grid(param_specs):
+    # Create a list to hold the parameter ranges
+    param_ranges = []
+    # Iterate over each parameter specification
+    for param in param_specs:
+        # Generate a range for each parameter based on min, max, and step
+        param_range = range(param['min'], param['max'] + 1, param['step'])
+        param_ranges.append(param_range)
+
+    # Use itertools.product to create a grid of all parameter combinations
+    param_grid = list(itertools.product(*param_ranges))
+
+    # Convert each combination to a dictionary with parameter names
+    param_grid_dicts = [
+        {param_specs[i]['name']: combination[i] for i in range(len(param_specs))}
+        for combination in param_grid
+    ]
+
+    return param_grid_dicts
+    
+    
+def _indicator_precalculation(dict candles,double [:,::1] first_candles_set,strategy, bint skip_1m = False, preload_candles = False, str min_timeframe=None):
+    cdef Py_ssize_t  i, consider_timeframes, candle_prestorage_shape, index, offset, length,rows, index2, candle_count
+    cdef np.ndarray empty_ndarray, candle_prestorage, partial_array, partial_date_array, modified_partial_array, \
+    indicator1, indicator2
+    cdef double[::1] gen_candles
+    cdef tuple timeframe_tuple = config['app']['trading_timeframes']
+    cdef bint other_tf = False
+    cdef double [:,::1] new_candles, date_index, new_array, _partial_array
+    cdef double [::1] empty_array
+    cdef bint unused_route = False
+    cdef bint stock_prices = False
+    cdef np.ndarray candle_storage, full_candle_storage
+    router_list = []
+    for j in candles:
+        for timeframe in timeframe_tuple:
+            symbol = candles[j]['symbol']
+            exchange = candles[j]['exchange']
+            # skip unused route if candles are not preloaded
+            if f'{exchange}-{symbol}-{timeframe}' not in router_list and not preload_candles and router.extra_candles:
+                continue
+            if exchange in ['Polygon_Stocks','Polygon_Forex']:
+                stock_prices = True
+            if preload_candles and not stock_prices:
+                preload_candles = True   
+            # pd.DataFrame(candles[j]['candles']).to_csv('framework_candles.csv')
+            new_candles = candles[j]['candles']
+            key = f'{exchange}-{symbol}-{timeframe}'
+            consider_timeframes = jh.timeframe_to_one_minutes(timeframe)
+            candle_prestorage = store.candles.storage[f'{exchange}-{symbol}-1m'].array
+            candle_prestorage = trim_zeros(candle_prestorage) 
+            candle_prestorage_shape = len(candle_prestorage)
+            length = len(first_candles_set) + (candle_prestorage_shape)
+            full_array = np.zeros((int(length/(consider_timeframes))+1,6))
+            new_array = np.concatenate((candle_prestorage,new_candles),axis=0)
+            if (timeframe == '1m' and skip_1m): # or (len(config['app']['considering_timeframes']) > 1 and timeframe == '1m'): 
+                if min_timeframe == '1m':
+                    if preload_candles and skip_1m and not stock_prices:
+                        candle_storage = new_array
+                continue
+            _partial_array = np.zeros((int(length/(consider_timeframes))+1,6))   
+            partial_date_array = np.zeros((int(length/(consider_timeframes))+1,1))   
+            index = 0
+            index2 = 0
+            candle_count = 0
+            date_index = np.zeros([_partial_array.shape[0],2]) 
+            empty_ndarray = np.zeros(6)
+            empty_array = empty_ndarray[:]
+            if stock_prices:
+                return
+            else:
+                with nogil:
+                    for i in range(0,length):
+                        if ((i + 1) % consider_timeframes == 0):
+                            _partial_array[(index)] = generate_candles_from_minutes(new_array[(i - (consider_timeframes-1)):(i+1)],empty_array)
+                            index = index + 1 
+                            
+            partial_array = np.array(_partial_array)
+            full_candle_storage = partial_array
+            candle_storage = partial_array[(candle_prestorage_shape/consider_timeframes)-1:]
+            
+
+
+                    
+    return candle_storage,full_candle_storage, candle_prestorage_shape, consider_timeframes
+
+
+cdef fast_indicator_precalculation(np.ndarray partial_array,int candle_prestorage_shape,int consider_timeframes,strategy,_hp):
+    cdef np.ndarray indicator1, indicator2
+    strategy._hp_values = _hp
+    strategy._hp()
+    indicator1 = strategy._indicator1(precalc_candles = partial_array,sequential=True)
+    indicator2 = strategy._indicator2(precalc_candles = partial_array,sequential=True)
+    indicator1 = np.delete(indicator1,slice(0,(candle_prestorage_shape/consider_timeframes)))
+    indicator2 = np.delete(indicator2,slice(0,(candle_prestorage_shape/consider_timeframes)))
+    indicator1 = indicator1[:-1]
+    indicator2 = indicator2[:-1]
+    # print(f'candle_prestorage_shape: {candle_prestorage_shape}')
+    # print(f'consider_timeframes: {consider_timeframes}')
+    
+    return indicator1, indicator2

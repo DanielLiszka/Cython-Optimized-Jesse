@@ -723,21 +723,7 @@ def check_previous_n_trials_for_completion(study, n):
 
     return False
     
-def analyze()-> None:
-    validate_cwd()
-    cfg = get_config()
-    start_date = cfg['timespan-train']['start_date']
-    finish_date = cfg['timespan-train']['finish_date']
-    storage = f"postgresql://{cfg['postgres_username']}:{cfg['postgres_password']}@{cfg['postgres_host']}:{cfg['postgres_port']}/{cfg['postgres_db_name']}"
-    study_name = f"{cfg['strategy_name']}-{cfg['route'][0]['exchange']}-{cfg['route'][0]['symbol']}-{cfg['route'][0]['timeframe']}-{start_date}-{finish_date}-{cfg['mode']}"
-    try:
-        study = optuna.load_study(study_name=study_name, storage=storage)
-    except: 
-        print(Fore.RED + '\nNo Study Found\n' + Style.RESET_ALL)
-        exit(1)
-    analysis(study,True)
-    
-def analysis(study,save_time=False):
+def analysis(study):
     validate_cwd()
     cfg = get_config()
     sync_publish('progressString', 'Sorting Trials' ,'optuna')
@@ -819,9 +805,6 @@ def analysis(study,save_time=False):
         
     dir1 = f"./storage/optuna/validation/{cfg['strategy_name']}-{cfg['route'][0]['exchange']}-{cfg['route'][0]['symbol']}-{cfg['route'][0]['timeframe']}-{cfg['Interval_start']}-{cfg['Interval_end']}-{cfg['optimizer']}-{len(cfg['route'].items())} Pairs/"  
     sorted_candidate_trial_list_removal = []
-    if os.path.exists(f'{dir1}removed_candidates.pkl') and save_time:
-        with open(f'{dir1}removed_candidates.pkl', 'rb') as fp:
-            sorted_candidate_trial_list_removal = pickle.load(fp)
     sorted_candidate_trial_list = [x for x in sorted_candidate_trial_list if x not in sorted_candidate_trial_list_removal]
 
         
@@ -834,32 +817,23 @@ def analysis(study,save_time=False):
     if not os.path.exists(dir1):
         os.makedirs(dir1)
 
-    # Delete files in the 'temp' subdirectory
-    temp_dir = os.path.join(dir1, 'temp')
-    if os.path.exists(temp_dir):
-        for file in os.listdir(temp_dir):
-            file_path = os.path.join(temp_dir, file)
-            safe_remove(file_path)
-
-        # Check if the directory is empty before removing
-        if not os.listdir(temp_dir):
-            try:
-                os.rmdir(temp_dir)
-            except Exception as e:
-                pass
-
-    # Delete specific files in the main directory
-    for file in os.listdir(dir1):
-        if file != 'removed_candidates.pkl':
-            file_path = os.path.join(dir1, file)
-            safe_remove(file_path)
-           
+    if not os.path.exists(dir1):
+        os.mkdir(dir1)
+    if os.path.exists(f'{dir1}temp'):
         try: 
-            if not os.path.exists(f'{dir1}temp'):
-                os.mkdir(f'{dir1}temp')
-        except Exception as e: 
-            print(e)
+            for file in os.listdir(f'{dir1}temp'):
+                os.remove(f'{dir1}temp/{file}')
+        except:
             pass
+        os.rmdir(f'{dir1}temp')
+    try: 
+        for file in os.listdir(dir1):
+            if file != f'removed_candidates.pkl':
+                os.remove(f'{dir1}{file}')
+    except:
+        pass
+    if not os.path.exists(f'{dir1}temp'):
+        os.mkdir(f'{dir1}temp')
         
     Interval_start = cfg['Interval_start']
     Interval_end = cfg['Interval_end']
@@ -893,29 +867,17 @@ def analysis(study,save_time=False):
         for file in os.listdir(dir1):
             if file != f'removed_candidates.pkl':
                 file = f"{dir1}{file}"
-                try:
-                    if os.path.getsize(file) < (2 * 1024):
-                        try:
-                            os.remove(file)
-                        except Exception as e:
-                            print(e)
-                except Exception as e:
-                    print(e)
+                if os.path.getsize(file) < (2 * 1024):
+                    try:
+                        os.remove(file)
+                    except:
+                        pass
     try:
         os.rmdir(f'{dir1}temp')
     except:
-        try:
-            for filename in os.listdir(f'{dir1}temp/'):
-                try:
-                    os.remove(filename)
-                except Exception as e:
-                    print(e)
-        except Exception as e:
-            print(e)
-    try:
+        for filename in os.listdir(f'{dir1}temp/'):
+            os.remove(filename)
         os.rmdir(f'{dir1}temp')
-    except Exception as e:
-        print(e)
     
     """
     Full metrics backtesting 
@@ -948,7 +910,10 @@ def analysis(study,save_time=False):
                     with open(f'{dir1}temp/{filename}', 'rb') as f:
                         temp_trial_num = filename.split('.')[0]
                         full_metrics_dict[f"{temp_trial_num}"] = pickle.load(f)
-                    os.remove(f'{dir1}temp/{filename}')
+                    try:
+                        os.remove(f'{dir1}temp/{filename}')
+                    except:
+                        pass
             except Exception as e:
                 print(e)
         for file in os.listdir(dir1):
@@ -1045,9 +1010,9 @@ def analysis(study,save_time=False):
             if found == False and item not in sorted_candidate_trial_list_removal:
                 sorted_candidate_trial_list_removal.append(item)
         sorted_candidate_trial_list = [x for x in sorted_candidate_trial_list if x not in sorted_candidate_trial_list_removal]
-        if not save_time:
-            with open(f'{dir1}removed_candidates.pkl', 'wb') as fp:
-                pickle.dump(sorted_candidate_trial_list_removal, fp)
+
+        with open(f'{dir1}removed_candidates.pkl', 'wb') as fp:
+            pickle.dump(sorted_candidate_trial_list_removal, fp)
         # remove files not in sorted_candidate_trial_list
         for item in os.listdir(dir1):
             try:
@@ -1060,7 +1025,10 @@ def analysis(study,save_time=False):
                             found = True
                             break
                     if found == False:
-                        os.remove(f'{dir1}{item}')
+                        try:
+                            os.remove(f'{dir1}{item}')
+                        except:
+                            pass
             except IndexError:
                 continue
         file_count = sum(1 for item in os.listdir(dir1) if isfile(join(dir1, item))) 
@@ -1802,7 +1770,10 @@ def openpyxl_formating(df,base_filename,trial_num,cfg):
         print(f'unable to create a chart for {trial_num}')
         print(e)
         pass
-    os.remove(base_filename)
+    try:
+        os.remove(base_filename)
+    except: 
+        pass
     wb.save(base_filename)                    
 
 def set_chart_title_size(chart, size=1400):
@@ -2034,7 +2005,10 @@ def multiple_timeframes_func(dir1, output_df, cfg, index, sorted_candidate_trial
     drop_idx = list(range(2,t_df.shape[1],2))
     drop_cols =  [j for i,j in enumerate(t_df.columns) if i in drop_idx]
     t_df = t_df.drop(drop_cols,axis=1) 
-    os.remove(f'{filename}')
+    try:
+        os.remove(f'{filename}')
+    except:
+        pass
     for i in range(t_df.shape[0]):
         if i == 0:
             new_dataframe.iat[48,3] = f"Backtest Metrics from 3 Minute Timeframe to 6 hours from {pair_start} to {pair_end}"
@@ -2506,7 +2480,8 @@ def metrics_func(best_trial,missing_files,extra_files,cfg,Interval_start,Interva
             # Check to see if the interval backtesting has been completed
             try: 
                 final_df = pd.concat(map(pd.read_csv, files), ignore_index=True, axis=1)
-            except:
+            except Exception as e:
+                print(e)
                 print(f'{Fore.RED} Possibly Missing Files in Temp Folder {Style.RESET_ALL}')
                 pass
             drop_idx = list(range(2,final_df.shape[1],2))
