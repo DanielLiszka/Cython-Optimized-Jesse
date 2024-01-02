@@ -6,6 +6,7 @@
 import time
 from typing import Dict, Union, List
 import os
+import inspect
 # from guppy import hpy
 import arrow
 import numpy as np
@@ -1734,16 +1735,17 @@ def fast_simulator(candles: dict,
     #cdef int start_capital = 10000
     cdef double size,fee,minimum,position, balance,net_profit, invest_amount,sell_value, position_price, invest_fraction, transaction_fee, start_capital
     cdef dict new_dict = {}
+    cdef list indicators
     #print(param_grid)
     #print(params_length)
     # print(datetime.fromtimestamp(int(fed_candles[0][0]) / 1000, tz=timezone.utc).strftime("%Y-%m-%d %H:%M"))
     # print(datetime.fromtimestamp(int(fed_candles[-1][0]) / 1000, tz=timezone.utc).strftime("%Y-%m-%d %H:%M"))
     # df = pd.DataFrame(fed_candles)
     # df.to_csv('fed_candles.csv')
-
+    '''
     for i in range(params_length):
         hp = param_grid[i]
-        indicator1, indicator2 = fast_indicator_precalculation(full_candle_storage,candle_prestorage_shape,consider_timeframes,strategy,hp)
+        indicators = fast_indicator_precalculation(full_candle_storage,candle_prestorage_shape,consider_timeframes,strategy,hp)
 
         position_price = 0 
         position = 0
@@ -1753,7 +1755,7 @@ def fast_simulator(candles: dict,
         minimum = start_capital * 0.1
         balance = start_capital
         #print(np.array(indicator2_storage))
-        assert(indicator1.shape[0] == indicator2.shape[0] == memview_fed_candles.shape[0])
+        assert(indicator1.shape[0] == memview_fed_candles.shape[0])
         with nogil:
             for j in range(fed_candles_length):
                 #print("Balance:", balance, "Position:", position, "Position Price:", position_price, "Current Price:", memview_fed_candles[j])
@@ -1783,7 +1785,9 @@ def fast_simulator(candles: dict,
         new_dict[str(param_grid[i])] = net_profit
             #print(f'{param_grid[i]} - {net_profit}')
 
-    print(new_dict)
+    '''
+    result = generate_cython_code(params_length, memview_fed_candles, full_candle_storage, candle_prestorage_shape, consider_timeframes, strategy, strategy, param_grid)
+
     parsed_keys = [eval(key) for key in new_dict.keys()]
 
     sorted_combinations = sorted(parsed_keys, key=lambda x: new_dict[str(x)], reverse=True)
@@ -1939,17 +1943,132 @@ def _indicator_precalculation(dict candles,double [:,::1] first_candles_set,stra
     return candle_storage,full_candle_storage, candle_prestorage_shape, consider_timeframes
 
 
-cdef fast_indicator_precalculation(np.ndarray partial_array,int candle_prestorage_shape,int consider_timeframes,strategy,_hp):
-    cdef np.ndarray indicator1, indicator2
+def fast_indicator_precalculation(np.ndarray partial_array, int candle_prestorage_shape, int consider_timeframes, strategy, _hp):
+    cdef list indicators = []  # List to store the indicator arrays
+
     strategy._hp_values = _hp
     strategy._hp()
-    indicator1 = strategy._indicator1(precalc_candles = partial_array,sequential=True)
-    indicator2 = strategy._indicator2(precalc_candles = partial_array,sequential=True)
-    indicator1 = np.delete(indicator1,slice(0,(candle_prestorage_shape/consider_timeframes)))
-    indicator2 = np.delete(indicator2,slice(0,(candle_prestorage_shape/consider_timeframes)))
-    indicator1 = indicator1[:-1]
-    indicator2 = indicator2[:-1]
-    # print(f'candle_prestorage_shape: {candle_prestorage_shape}')
-    # print(f'consider_timeframes: {consider_timeframes}')
+
+    # Loop to handle up to 10 indicators
+    for i in range(1, 11):
+        indicator_method = getattr(strategy, f'_indicator{i}', None)
+        if callable(indicator_method):
+            # Calculate the indicator
+            indicator = indicator_method(precalc_candles=partial_array, sequential=True)
+
+            # Process the indicator if it's not None
+            if indicator is not None:
+                indicator = np.delete(indicator, slice(0, (candle_prestorage_shape / consider_timeframes)))
+                indicator = indicator[:-1]  # Assuming similar processing for all indicators
+                indicators.append(indicator)
+
+    return indicators  # Return the list of indicators
     
-    return indicator1, indicator2
+import re 
+import pyximport
+
+def generate_cython_code(params_length, memview_fed_candles, full_candle_storage, candle_prestorage_shape, consider_timeframes, strategy,strategy_class, param_grid):
+    cdef int i 
+    # Extract logic from strategy methods
+    should_long_logic = inspect.getsource(strategy_class.should_long).strip()
+
+    # Determine which method to use for 'should_short_logic'
+    if strategy_class.should_short is not None:
+        should_short_logic = inspect.getsource(strategy_class.should_short).strip()
+    else:
+        # Extract logic from update_position method
+        update_position_logic = inspect.getsource(strategy_class.update_position).strip()
+        # Use regex to extract the condition from the first if statement
+        match = re.search(r'if (.+):', update_position_logic)
+        should_short_logic = match.group(1) if match else ""
+
+    # Define the indicator variable declarations
+    indicator_declarations = "\n".join([f"cdef double [:] indicator{i}" for i in range(1, 11)])
+
+    # Function to translate Python logic to Cython logic
+    def translate_logic(logic):
+        for i in range(1, 11):
+            logic = re.sub(f"self._indicator{i}_value\[-1\]", f"indicator{i}[j]", logic)
+            logic = re.sub(f"self._indicator{i}_value\[-2\]", f"indicator{i}[j-1]", logic)
+        return logic
+
+    should_long_logic_cython = translate_logic(should_long_logic)
+    should_short_logic_cython = translate_logic(should_short_logic)
+
+
+    # Generate the Cython code
+    cython_code = f"""
+# cython: language_level=3
+# Necessary imports, e.g., numpy as np
+
+def optimized_function(int params_length, double [:] memview_fed_candles, np.ndarray full_candle_storage, int candle_prestorage_shape, int consider_timeframes, strategy,strategy_class):  # Define your parameters
+    {indicator_declarations}
+    
+    cdef float fee, size, minimum, balance, position_price, position, invest_amount 
+    cdef Py_ssize_t i, j
+    # Unpack indicators based on their count
+    for i in range(len(indicators)):
+        exec(f"indicator{i+1} = indicators[i]")
+        
+    for i in range(params_length):
+        hp = param_grid[i]
+        indicators = fast_indicator_precalculation(full_candle_storage,candle_prestorage_shape,consider_timeframes,strategy,hp)
+
+        position_price = 0 
+        position = 0
+        start_capital = 10000.0
+        fee = 0.001
+        size = 0.1
+        
+        minimum = start_capital * 0.1
+        balance = start_capital
+        
+        assert(indicator1.shape[0] == memview_fed_candles.shape[0])
+        with nogil:
+            for j in range(fed_candles_length):
+                # Implement the translated should_long logic
+                if {should_long_logic_cython} and position == 0:
+                    invest_amount = balance * size - (balance * size * fee)  # investing 10% of current balance
+                    position = (invest_amount / memview_fed_candles[j])  # calculating the quantity of the asset to buy
+                    balance -= (invest_amount + invest_amount * fee)  # update balance after purchase
+                    position_price = memview_fed_candles[j]  # record entry price
+
+                # Implement the translated should_short logic
+                elif {should_short_logic_cython} and position != 0:
+                    sell_value = position * memview_fed_candles[j]  # value of the asset at current price
+                    balance += (sell_value - sell_value * fee)  # update balance with profit/loss
+                    position = 0  # reset position
+                    position_price = 0  # reset position price
+
+                if balance < minimum:
+                    break
+
+        # Calculate net profit
+        net_profit = balance - start_capital
+
+        new_dict[str(param_grid[i])] = net_profit
+            
+    return net_dict
+    """
+
+    # Define the path for the generated .pyx file
+    generated_file_path = os.path.join('storage', 'generated_optimization.pyx')
+
+    # Write the generated code to the .pyx file
+    with open(generated_file_path, 'w') as file:
+        file.write(cython_code)
+
+    # Add the storage directory to sys.path
+    storage_dir = os.path.abspath('storage')
+    if storage_dir not in sys.path:
+        sys.path.append(storage_dir)
+
+    # Install pyximport
+    pyximport.install()
+
+    # Now you can use the optimized_function
+    # For example, call optimized_function with required arguments
+    from storage import generated_optimization 
+    
+    result = generated_optimization.optimized_function(params_length, memview_fed_candles, full_candle_storage, candle_prestorage_shape, consider_timeframes, strategy, param_grid)
+    return result
