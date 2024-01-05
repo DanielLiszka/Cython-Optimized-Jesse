@@ -1786,7 +1786,8 @@ def fast_simulator(candles: dict,
             #print(f'{param_grid[i]} - {net_profit}')
 
     '''
-    result = generate_cython_code(params_length, memview_fed_candles, full_candle_storage, candle_prestorage_shape, consider_timeframes, strategy, strategy, param_grid)
+
+    new_dict = generate_cython_code(params_length, memview_fed_candles, full_candle_storage, candle_prestorage_shape, consider_timeframes, strategy, strategy, param_grid)
 
     parsed_keys = [eval(key) for key in new_dict.keys()]
 
@@ -1953,25 +1954,28 @@ def fast_indicator_precalculation(np.ndarray partial_array, int candle_prestorag
     for i in range(1, 11):
         indicator_method = getattr(strategy, f'_indicator{i}', None)
         if callable(indicator_method):
-            # Calculate the indicator
             indicator = indicator_method(precalc_candles=partial_array, sequential=True)
 
-            # Process the indicator if it's not None
             if indicator is not None:
                 indicator = np.delete(indicator, slice(0, (candle_prestorage_shape / consider_timeframes)))
-                indicator = indicator[:-1]  # Assuming similar processing for all indicators
+                indicator = indicator[:-1]  
                 indicators.append(indicator)
 
-    return indicators  # Return the list of indicators
+    return indicators
     
 import re 
 import pyximport
 
 def generate_cython_code(params_length, memview_fed_candles, full_candle_storage, candle_prestorage_shape, consider_timeframes, strategy,strategy_class, param_grid):
     cdef int i 
-    # Extract logic from strategy methods
-    should_long_logic = inspect.getsource(strategy_class.should_long).strip()
+    cdef dict new_dict 
 
+    should_long_logic = inspect.getsource(strategy_class.should_long).strip()
+    match = re.search(r'return (.+)', should_long_logic)
+    if match:
+        match = match.group(1).strip()
+    should_long_logic = match
+    
     # Determine which method to use for 'should_short_logic'
     if strategy_class.should_short is not None:
         should_short_logic = inspect.getsource(strategy_class.should_short).strip()
@@ -1999,21 +2003,67 @@ def generate_cython_code(params_length, memview_fed_candles, full_candle_storage
     # Generate the Cython code
     cython_code = f"""
 # cython: language_level=3
-# Necessary imports, e.g., numpy as np
+import numpy as np 
+cimport numpy as np
 
-def optimized_function(int params_length, double [:] memview_fed_candles, np.ndarray full_candle_storage, int candle_prestorage_shape, int consider_timeframes, strategy,strategy_class):  # Define your parameters
-    {indicator_declarations}
+        
+def fast_indicator_precalculation(np.ndarray partial_array, int candle_prestorage_shape, int consider_timeframes, strategy, _hp):
+    cdef list indicators = []  # List to store the indicator arrays
+
+    strategy._hp_values = _hp
+    strategy._hp()
+
+    # Loop to handle up to 10 indicators
+    for i in range(1, 11):
+        indicator_method = getattr(strategy, f'_indicator{i}', None)
+        if callable(indicator_method):
+            # Calculate the indicator
+            indicator = indicator_method(precalc_candles=partial_array, sequential=True)
+
+            # Process the indicator if it's not None
+            if indicator is not None:
+                indicator = np.delete(indicator, slice(0, (candle_prestorage_shape / consider_timeframes)))
+                indicator = indicator[:-1]  # Assuming similar processing for all indicators
+                indicators.append(indicator)
+
+    return indicators  # Return the list of indicators
+    
+def optimized_function(int params_length, double [:] memview_fed_candles, np.ndarray full_candle_storage, 
+                       int candle_prestorage_shape, int consider_timeframes, strategy, param_grid):  
+    cdef double [:] indicator1, indicator2, indicator3, indicator4, indicator5, indicator6, indicator7, indicator8, indicator9, indicator10
     
     cdef float fee, size, minimum, balance, position_price, position, invest_amount 
+    cdef list indicators 
     cdef Py_ssize_t i, j
-    # Unpack indicators based on their count
-    for i in range(len(indicators)):
-        exec(f"indicator{i+1} = indicators[i]")
-        
+    cdef dict new_dict
+    new_dict = {{}}
+    cdef int list_size, memview_fed_candles_length
+    memview_fed_candles_length = len(memview_fed_candles)
+    
     for i in range(params_length):
         hp = param_grid[i]
-        indicators = fast_indicator_precalculation(full_candle_storage,candle_prestorage_shape,consider_timeframes,strategy,hp)
-
+        indicators = fast_indicator_precalculation(full_candle_storage, candle_prestorage_shape, consider_timeframes, strategy, hp)
+        list_size = len(indicators)
+        if list_size >= 1:
+            indicator1 = indicators[0]
+        if list_size >= 2:
+            indicator2 = indicators[1]
+        if list_size >= 3:
+            indicator3 = indicators[2]
+        if list_size >= 4: 
+            indicator4 = indicators[3]
+        if list_size >= 5:
+            indicator5 = indicators[4]
+        if list_size >= 6:
+            indicator6 = indicators[5]
+        if list_size >= 7:
+            indicator7 = indicators[6]
+        if list_size >= 8:
+            indicator8 = indicators[7]
+        if list_size >= 9:
+            indicator9 = indicators[8]
+        if list_size >= 10:
+            indicator10 = indicators[9]
         position_price = 0 
         position = 0
         start_capital = 10000.0
@@ -2023,33 +2073,33 @@ def optimized_function(int params_length, double [:] memview_fed_candles, np.nda
         minimum = start_capital * 0.1
         balance = start_capital
         
-        assert(indicator1.shape[0] == memview_fed_candles.shape[0])
+        assert indicators[0].shape[0] == memview_fed_candles.shape[0]
+        
         with nogil:
-            for j in range(fed_candles_length):
-                # Implement the translated should_long logic
+            for j in range(memview_fed_candles_length):
                 if {should_long_logic_cython} and position == 0:
-                    invest_amount = balance * size - (balance * size * fee)  # investing 10% of current balance
-                    position = (invest_amount / memview_fed_candles[j])  # calculating the quantity of the asset to buy
-                    balance -= (invest_amount + invest_amount * fee)  # update balance after purchase
-                    position_price = memview_fed_candles[j]  # record entry price
+                    # Logic for opening position
+                    invest_amount = balance * size - (balance * size * fee)
+                    position = invest_amount / memview_fed_candles[j]
+                    balance -= invest_amount + invest_amount * fee
+                    position_price = memview_fed_candles[j]
 
-                # Implement the translated should_short logic
                 elif {should_short_logic_cython} and position != 0:
-                    sell_value = position * memview_fed_candles[j]  # value of the asset at current price
-                    balance += (sell_value - sell_value * fee)  # update balance with profit/loss
-                    position = 0  # reset position
-                    position_price = 0  # reset position price
+                    # Logic for closing position
+                    sell_value = position * memview_fed_candles[j]
+                    balance += sell_value - sell_value * fee
+                    position = 0
+                    position_price = 0
 
                 if balance < minimum:
                     break
 
-        # Calculate net profit
-        net_profit = balance - start_capital
 
+        net_profit = balance - start_capital
         new_dict[str(param_grid[i])] = net_profit
-            
-    return net_dict
-    """
+
+    return new_dict
+        """
 
     # Define the path for the generated .pyx file
     generated_file_path = os.path.join('storage', 'generated_optimization.pyx')
@@ -2063,12 +2113,11 @@ def optimized_function(int params_length, double [:] memview_fed_candles, np.nda
     if storage_dir not in sys.path:
         sys.path.append(storage_dir)
 
-    # Install pyximport
+    # Import the compiled module using pyximport
     pyximport.install()
-
-    # Now you can use the optimized_function
-    # For example, call optimized_function with required arguments
     from storage import generated_optimization 
-    
-    result = generated_optimization.optimized_function(params_length, memview_fed_candles, full_candle_storage, candle_prestorage_shape, consider_timeframes, strategy, param_grid)
-    return result
+
+    # Call the optimized_function with required arguments
+    new_dict = generated_optimization.optimized_function(params_length, memview_fed_candles, full_candle_storage, candle_prestorage_shape, consider_timeframes, strategy, param_grid)
+
+    return new_dict
