@@ -2055,16 +2055,16 @@ def fast_indicator_precalculation(np.ndarray partial_array, int candle_prestorag
     
 def optimized_function(int params_length, double [:] memview_fed_candles, np.ndarray full_candle_storage, 
                        int candle_prestorage_shape, int consider_timeframes, strategy, param_grid):  
+    from jesse.services.redis import sync_publish
     cdef double [:] indicator1, indicator2, indicator3, indicator4, indicator5, indicator6, indicator7, indicator8, indicator9, indicator10
-    
     cdef float fee, size, minimum, balance, position_price, position, invest_amount 
     cdef list indicators 
     cdef Py_ssize_t i, j
     cdef dict new_dict
     new_dict = {{}}
-    cdef int list_size, memview_fed_candles_length
+    cdef int list_size, memview_fed_candles_length, one_percent, progress_percentage
     memview_fed_candles_length = len(memview_fed_candles)
-    
+    one_percent = int(params_length / 100)
     for i in range(params_length):
         hp = param_grid[i]
         indicators = fast_indicator_precalculation(full_candle_storage, candle_prestorage_shape, consider_timeframes, strategy, hp)
@@ -2118,8 +2118,10 @@ def optimized_function(int params_length, double [:] memview_fed_candles, np.nda
 
                 if balance < minimum:
                     break
-
-
+        
+        if i % one_percent == 0:
+            progress_percentage = int((i / params_length) * 100)
+            sync_publish('image_status', f'Conducting Backtests...  {{progress_percentage}}% Complete')
         net_profit = balance - start_capital
         new_dict[str(param_grid[i])] = net_profit
 
