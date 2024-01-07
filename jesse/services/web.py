@@ -35,6 +35,15 @@ class BacktestRequestJson(BaseModel):
     export_backtesting_chart: bool
     export_correlation_table: bool
 
+class ParamEvalRequestJson(BaseModel):
+    id: str
+    routes: List[Dict[str, str]]
+    extra_routes: List[Dict[str, str]]
+    config: dict
+    start_date: str
+    finish_date: str
+    debug_mode: bool
+
 
 class OptimizationRequestJson(BaseModel):
     id: str

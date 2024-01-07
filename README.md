@@ -8,6 +8,7 @@ This is a maintained modified version of the Jesse backtesting framework. Create
 * Forex backtesting/optimization
 * Optional indicator precalculation w/o candle preloading
 * Monte Carlo Simulation
+* Fast grid search parameter evaluation
 * Easy parameter modification and strategy editing via the dashboard
 * Integrated Optuna optimization
 * Correlation table generation

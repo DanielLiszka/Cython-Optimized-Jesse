@@ -58,7 +58,10 @@ from timeloop import Timeloop
 from datetime import timedelta
 from jesse.services.progressbar import Progressbar
 from jesse.enums import order_statuses
-
+import itertools
+import json 
+import redis
+import base64
 from cpython cimport * 
 cdef extern from "Python.h":
         Py_ssize_t PyList_GET_SIZE(object list)
@@ -177,6 +180,74 @@ def run(
     from jesse.services.db import database
     database.close_connection()
 
+def param_eval(
+        debug_mode,
+        user_config: dict,
+        routes: List[Dict[str, str]],
+        extra_routes: List[Dict[str, str]],
+        start_date: str,
+        finish_date: str,
+        candles: dict = None,
+) -> None:
+    if not jh.is_unit_testing():
+        status_checker = Timeloop()
+        @status_checker.job(interval=timedelta(seconds=1))
+        def handle_time():
+            if process_status() != 'started':
+                raise exceptions.Termination
+        status_checker.start()
+
+
+   
+    cdef list change,data
+    cdef int routes_count, index
+
+    from jesse.config import config, set_config
+    config['app']['trading_mode'] = 'backtest'
+    config['app']['debug_mode'] = debug_mode
+    if not jh.is_unit_testing():
+        set_config(user_config) 
+    
+    router.initiate(routes, extra_routes)
+    
+    store.app.set_session_id()
+
+    register_custom_exception_handler()
+
+    validate_routes(router)
+
+    store.candles.init_storage(500000)
+
+    if candles is None:
+        candles = load_candles(start_date, finish_date)
+        for j in candles:
+            if candles[j]['exchange'] in ['Polygon_Stocks','Polygon_Forex']:
+                config['env']['simulation']['preload_candles'] = False
+                config['env']['simulation']['precalculation'] = True
+    if not jh.should_execute_silently():
+        sync_publish('general_info', {
+            'session_id': jh.get_session_id(),
+            'debug_mode': str(config['app']['debug_mode']),
+        })
+
+        key = f"{config['app']['considering_candles'][0][0]}-{config['app']['considering_candles'][0][1]}"
+        sync_publish('candles_info', stats.candles_info(candles[key]['candles']))
+
+        sync_publish('routes_info', stats.routes(router.routes))
+    try:
+        fast_simulator(
+            candles,
+            run_silently=jh.should_execute_silently(),
+            start_date = start_date, 
+            finish_date = finish_date
+        )
+    except Exception as e:
+        print(e)
+        sync_publish('image_status', 'Exception occured')
+        
+    from jesse.services.db import database
+    database.close_connection()
+    
 def _generate_quantstats_report(candles_dict: dict, finish_date: str, start_date: str) -> str:
     if store.completed_trades.count == 0:
         return None
@@ -306,9 +377,7 @@ def load_candles(start_date_str: str, finish_date_str: str) -> Dict[str, Dict[st
     return candles
 
 def simulator(*args, **kwargs):	
-    if jh.get_config('env.simulation.fast'):
-        result = fast_simulator(*args, **kwargs)
-    elif jh.get_config('env.simulation.skip'):
+    if jh.get_config('env.simulation.skip'):
         result = skip_simulator(*args, **kwargs)
     else:
         result = iterative_simulator(*args, **kwargs)	
@@ -1662,25 +1731,18 @@ cdef _simulate_price_change_effect_skip(double[::1] real_candle, str exchange, s
 def fast_simulator(candles: dict,
         run_silently: bool,
         hyperparameters: dict = None,
-        generate_charts: bool = False,
-        generate_tradingview: bool = False,
-        generate_quantstats: bool = False,
-        generate_backtesting_chart: bool = False,
-        generate_correlation_table: bool = False,
-        generate_csv: bool = False,
-        generate_json: bool = False,
-        generate_equity_curve: bool = False,
-        generate_hyperparameters: bool = False,
         start_date: str = None,
         finish_date: str = None,
-        full_path_name: str= None,
-        full_name: str = None
 ) -> dict:
     import json
     import time
     from datetime import datetime, timezone
-    start = time.time()
-    result = {}
+    import pandas as pd 
+    import seaborn as sns
+    import ast 
+    
+    result = []
+
     cdef Py_ssize_t i, j 
     cdef int count, length, min_timeframe,min_timeframe_remainder, candle_prestorage_shape, consider_timeframes, fed_candles_length
     cdef double[:,::1] _first_candles_set
@@ -1694,9 +1756,6 @@ def fast_simulator(candles: dict,
     store.app.starting_time = first_candles_set[0][0]
     store.app.time = first_candles_set[0][0]
     min_timeframe, strategy = initialized_strategies(hyperparameters)
-    if full_path_name and full_name:
-        strategy.full_path_name = full_path_name
-        strategy.full_name = full_name
 
     dic = {
         timeframes.MINUTE_1: 1,
@@ -1742,50 +1801,6 @@ def fast_simulator(candles: dict,
     # print(datetime.fromtimestamp(int(fed_candles[-1][0]) / 1000, tz=timezone.utc).strftime("%Y-%m-%d %H:%M"))
     # df = pd.DataFrame(fed_candles)
     # df.to_csv('fed_candles.csv')
-    '''
-    for i in range(params_length):
-        hp = param_grid[i]
-        indicators = fast_indicator_precalculation(full_candle_storage,candle_prestorage_shape,consider_timeframes,strategy,hp)
-
-        position_price = 0 
-        position = 0
-        start_capital = 10000.0
-        fee = 0.001
-        size = 0.1
-        minimum = start_capital * 0.1
-        balance = start_capital
-        #print(np.array(indicator2_storage))
-        assert(indicator1.shape[0] == memview_fed_candles.shape[0])
-        with nogil:
-            for j in range(fed_candles_length):
-                #print("Balance:", balance, "Position:", position, "Position Price:", position_price, "Current Price:", memview_fed_candles[j])
-                # Opening a position
-                if indicator1[j] > indicator2[j] and position == 0:
-                    invest_amount = balance * size - (balance * size * fee)  # investing 10% of current balance
-                    position = (invest_amount / memview_fed_candles[j])  # calculating the quantity of the asset to buy
-                    balance -= (invest_amount + invest_amount * fee)  # update balance after purchase
-                    position_price = memview_fed_candles[j]  # record entry price
-                # Closing a position
-                elif indicator1[j] < indicator2[j] and position != 0:
-                    sell_value = position * memview_fed_candles[j]  # value of the asset at current price
-                    balance += (sell_value - sell_value * fee)  # update balance with profit/loss
-                    position = 0  # reset position
-                    position_price = 0  # reset position price
-
-                if balance < minimum:
-                    break
-
-        # Calculate net profit
-        net_profit = balance - start_capital
-        #print(hp)
-        # if hp == {'Fast SMA': 50, 'Slow SMA': 200}:
-            # print(net_profit)
-            # return
-        # if net_profit > 0:
-        new_dict[str(param_grid[i])] = net_profit
-            #print(f'{param_grid[i]} - {net_profit}')
-
-    '''
 
     new_dict = generate_cython_code(params_length, memview_fed_candles, full_candle_storage, candle_prestorage_shape, consider_timeframes, strategy, strategy, param_grid)
 
@@ -1793,8 +1808,8 @@ def fast_simulator(candles: dict,
 
     sorted_combinations = sorted(parsed_keys, key=lambda x: new_dict[str(x)], reverse=True)
 
-    # Select top-performing combinations (e.g., top 25%)
-    top_percentile = int(len(sorted_combinations) * 0.25)
+    # Select top-performing combinations (e.g., top 15%)
+    top_percentile = int(len(sorted_combinations) * 0.15)
     top_combinations = sorted_combinations[:top_percentile]
 
     # Analyze parameter ranges for top-performing combinations
@@ -1811,24 +1826,19 @@ def fast_simulator(candles: dict,
         new_param_ranges_top[param] = (min(values), max(values))
 
     # Print the new ranges for top performers
-    print("New parameter ranges based on top-performing combinations:")
-    for param, range_ in new_param_ranges_top.items():
-        print(f"{param}: Range {range_}")
-        
+    # print("New parameter ranges based on top-performing combinations:")
+    # for param, range_ in new_param_ranges_top.items():
+        # print(f"{param}: Range {range_}")
 
-    import ast  # Import the ast module
-
-    # Initialize an empty data dictionary
     data = {'profit': []}
 
-    # Identify all unique parameters
     for params in new_dict.keys():
-        params_dict = ast.literal_eval(params)  # Convert string to dictionary
+        params_dict = ast.literal_eval(params) 
         for param in params_dict.keys():
             if param not in data:
                 data[param] = []
 
-    # Add profits to data dictionary
+
     for params, profit in new_dict.items():
         params_dict = ast.literal_eval(params)
         for param, value in params_dict.items():
@@ -1837,7 +1847,6 @@ def fast_simulator(candles: dict,
 
     df = pd.DataFrame(data)
 
-    # Plotting for each parameter
     unique_params = set(df.columns) - {'profit'}
     for param in unique_params:
         avg_profit = df.groupby(param)['profit'].mean()
@@ -1846,30 +1855,56 @@ def fast_simulator(candles: dict,
         plt.title(f"Average Profit by {param}")
         plt.ylabel("Average Profit")
         plt.xlabel(param)
-        plt.savefig(f'plot_{param}.png')  # Save the plot as an image file
+        plt.savefig(f'storage/plot_{param}.jpg')  
+        result.append(f'storage/plot_{param}.jpg')
         plt.close() 
             
-    end = time.time()
-    print(end-start)
-    return result
+    
+    data = []
+    for params, profit in new_dict.items():
+        params_dict = ast.literal_eval(params)
+        params_dict['profit'] = profit
+        data.append(params_dict)
+
+    df = pd.DataFrame(data)
+
+    param_names = list(df.columns)
+    if len(param_names) <= 3:
+        param_names.remove('profit')  
+        param1, param2 = param_names[:2]  
+
+        pivot_table = df.pivot_table(values='profit', index=param1, columns=param2)
+
+        plt.figure(figsize=(14, 14))
+        sns.heatmap(pivot_table, annot=True, fmt=".1f", cmap="YlGnBu")
+        plt.title(f"Profit Heatmap ({param1} vs {param2})")
+        plt.xlabel(param2)
+        plt.ylabel(param1)
+
+        plt.savefig('storage/heatmap.jpg', dpi=300)
+        result.append('storage/heatmap.jpg')
+        plt.close()
+         
+    sync_publish('image_status', 'finished')
+    send_images_via_redis(result)
     
     
-import itertools
-import json 
+def send_images_via_redis(image_paths):
+    for image_path in image_paths:
+        with open(image_path, "rb") as image_file:
+            encoded_string = base64.b64encode(image_file.read()).decode('utf-8')
+        
+        sync_publish('images', encoded_string)
+
 
 def create_param_grid(param_specs):
-    # Create a list to hold the parameter ranges
     param_ranges = []
-    # Iterate over each parameter specification
     for param in param_specs:
-        # Generate a range for each parameter based on min, max, and step
         param_range = range(param['min'], param['max'] + 1, param['step'])
         param_ranges.append(param_range)
 
-    # Use itertools.product to create a grid of all parameter combinations
     param_grid = list(itertools.product(*param_ranges))
 
-    # Convert each combination to a dictionary with parameter names
     param_grid_dicts = [
         {param_specs[i]['name']: combination[i] for i in range(len(param_specs))}
         for combination in param_grid
@@ -1943,53 +1978,44 @@ def _indicator_precalculation(dict candles,double [:,::1] first_candles_set,stra
                     
     return candle_storage,full_candle_storage, candle_prestorage_shape, consider_timeframes
 
-
-def fast_indicator_precalculation(np.ndarray partial_array, int candle_prestorage_shape, int consider_timeframes, strategy, _hp):
-    cdef list indicators = []  # List to store the indicator arrays
-
-    strategy._hp_values = _hp
-    strategy._hp()
-
-    # Loop to handle up to 10 indicators
-    for i in range(1, 11):
-        indicator_method = getattr(strategy, f'_indicator{i}', None)
-        if callable(indicator_method):
-            indicator = indicator_method(precalc_candles=partial_array, sequential=True)
-
-            if indicator is not None:
-                indicator = np.delete(indicator, slice(0, (candle_prestorage_shape / consider_timeframes)))
-                indicator = indicator[:-1]  
-                indicators.append(indicator)
-
-    return indicators
     
 import re 
 import pyximport
 
+def extract_condition_from_method(method_source, method_type='return', remove_part=''):
+    """Extracts the conditional part from a method's source and removes specified part."""
+    if method_type == 'return':
+        match = re.search(r'return (.+)', method_source)
+    elif method_type == 'if':
+        match = re.search(r'if (.+):', method_source)
+
+    condition = ""
+    if match:
+        condition = match.group(1).strip()
+
+    if remove_part and remove_part in condition:
+        condition = condition.replace(remove_part, '').strip()
+
+    return condition
+    
 def generate_cython_code(params_length, memview_fed_candles, full_candle_storage, candle_prestorage_shape, consider_timeframes, strategy,strategy_class, param_grid):
     cdef int i 
     cdef dict new_dict 
 
-    should_long_logic = inspect.getsource(strategy_class.should_long).strip()
-    match = re.search(r'return (.+)', should_long_logic)
-    if match:
-        match = match.group(1).strip()
-    should_long_logic = match
-    
-    # Determine which method to use for 'should_short_logic'
-    if strategy_class.should_short is not None:
-        should_short_logic = inspect.getsource(strategy_class.should_short).strip()
-    else:
-        # Extract logic from update_position method
-        update_position_logic = inspect.getsource(strategy_class.update_position).strip()
-        # Use regex to extract the condition from the first if statement
-        match = re.search(r'if (.+):', update_position_logic)
-        should_short_logic = match.group(1) if match else ""
+    should_long_source = inspect.getsource(strategy_class.should_long).strip()
+    should_long_logic = extract_condition_from_method(should_long_source)
 
-    # Define the indicator variable declarations
+    should_short_source = inspect.getsource(strategy_class.should_short).strip()
+    if "return False" not in should_short_source:
+        should_short_logic = extract_condition_from_method(should_short_source)
+    else:
+        update_position_source = inspect.getsource(strategy_class.update_position).strip()
+        should_short_logic = extract_condition_from_method(update_position_source, method_type='if', remove_part='and self.is_long')
+
+
+
     indicator_declarations = "\n".join([f"cdef double [:] indicator{i}" for i in range(1, 11)])
 
-    # Function to translate Python logic to Cython logic
     def translate_logic(logic):
         for i in range(1, 11):
             logic = re.sub(f"self._indicator{i}_value\[-1\]", f"indicator{i}[j]", logic)
@@ -2005,28 +2031,27 @@ def generate_cython_code(params_length, memview_fed_candles, full_candle_storage
 # cython: language_level=3
 import numpy as np 
 cimport numpy as np
+np.import_array()
 
         
 def fast_indicator_precalculation(np.ndarray partial_array, int candle_prestorage_shape, int consider_timeframes, strategy, _hp):
-    cdef list indicators = []  # List to store the indicator arrays
+    cdef list indicators = []
 
     strategy._hp_values = _hp
     strategy._hp()
 
-    # Loop to handle up to 10 indicators
-    for i in range(1, 11):
-        indicator_method = getattr(strategy, f'_indicator{i}', None)
-        if callable(indicator_method):
-            # Calculate the indicator
+    # Dynamically find and call indicator methods
+    for i in range(1, 11):  # Assuming a maximum of 10 indicators
+        indicator_method_name = f'_indicator{{i}}'
+        if hasattr(strategy, indicator_method_name):
+            indicator_method = getattr(strategy, indicator_method_name)
             indicator = indicator_method(precalc_candles=partial_array, sequential=True)
-
-            # Process the indicator if it's not None
             if indicator is not None:
-                indicator = np.delete(indicator, slice(0, (candle_prestorage_shape / consider_timeframes)))
-                indicator = indicator[:-1]  # Assuming similar processing for all indicators
+                indicator = np.delete(indicator, slice(0, int(candle_prestorage_shape / consider_timeframes)))
+                indicator = indicator[:-1]
                 indicators.append(indicator)
 
-    return indicators  # Return the list of indicators
+    return indicators
     
 def optimized_function(int params_length, double [:] memview_fed_candles, np.ndarray full_candle_storage, 
                        int candle_prestorage_shape, int consider_timeframes, strategy, param_grid):  
@@ -2101,23 +2126,49 @@ def optimized_function(int params_length, double [:] memview_fed_candles, np.nda
     return new_dict
         """
 
-    # Define the path for the generated .pyx file
     generated_file_path = os.path.join('storage', 'generated_optimization.pyx')
 
-    # Write the generated code to the .pyx file
     with open(generated_file_path, 'w') as file:
         file.write(cython_code)
 
-    # Add the storage directory to sys.path
-    storage_dir = os.path.abspath('storage')
-    if storage_dir not in sys.path:
-        sys.path.append(storage_dir)
+    setup_content = """
+from setuptools import setup, Extension
+from Cython.Build import cythonize
+import numpy
 
-    # Import the compiled module using pyximport
-    pyximport.install()
-    from storage import generated_optimization 
+setup(
+    name='Generated Optimization Module',
+    ext_modules=cythonize([
+        Extension('generated_optimization', ['generated_optimization.pyx'], include_dirs=[numpy.get_include()])
+    ])
+)
+    """
 
-    # Call the optimized_function with required arguments
-    new_dict = generated_optimization.optimized_function(params_length, memview_fed_candles, full_candle_storage, candle_prestorage_shape, consider_timeframes, strategy, param_grid)
+    setup_file_path = os.path.join('storage', 'setup.py')
+
+    with open(setup_file_path, 'w') as file:
+        file.write(setup_content)
+
+    import subprocess
+    try:
+        result = subprocess.run(
+            ["python", "setup.py", "build_ext", "--inplace"],  # Adjusted file path
+            check=True,
+            cwd='storage',  # Current working directory is 'storage'
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True
+        )
+        print(result.stdout)
+    except subprocess.CalledProcessError as e:
+        print("Error:", e.stderr)
+        raise
+
+    import sys
+    sys.path.append('storage')
+    from generated_optimization import optimized_function
+
+
+    new_dict = optimized_function(params_length, memview_fed_candles, full_candle_storage, candle_prestorage_shape, consider_timeframes, strategy, param_grid)
 
     return new_dict

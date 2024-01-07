@@ -14,7 +14,7 @@ from jesse.services.redis import async_redis, async_publish, sync_publish
 from jesse.services.web import fastapi_app, BacktestRequestJson, ImportCandlesRequestJson, CancelRequestJson, \
     LoginRequestJson, ConfigRequestJson, LoginJesseTradeRequestJson, NewStrategyRequestJson, FeedbackRequestJson, \
     ReportExceptionRequestJson, OptimizationRequestJson, OptunaRequestJson, OptunaSpecialRequestJson, HyperparametersSavingRequestJson, HyperparametersSendingRequestJson, \
-    CodeSendingRequestJson
+    CodeSendingRequestJson, ParamEvalRequestJson
 import uvicorn
 from asyncio import Queue
 import jesse.helpers as jh
@@ -340,6 +340,31 @@ def hyperparameters_saving(request_json: HyperparametersSavingRequestJson, autho
     return JSONResponse({'message': 'Sent Hyperparameters...'}, status_code=202)
 
 
+@fastapi_app.post("/param_eval")
+def param_evaluation(request_json: ParamEvalRequestJson, authorization: Optional[str] = Header(None)):
+    from jesse.services.multiprocessing_module import process_manager
+
+    if not authenticator.is_valid_token(authorization):
+        return authenticator.unauthorized_response()
+
+    validate_cwd()
+
+    from jesse.modes.backtest_mode import param_eval
+    process_manager.add_task(
+        param_eval,
+        'backtest-' + str(request_json.id),
+        request_json.debug_mode,
+        request_json.config,
+        request_json.routes,
+        request_json.extra_routes,
+        request_json.start_date,
+        request_json.finish_date,
+        None,
+    )
+    
+    return JSONResponse({'message': 'Started evaluating parameters...'}, status_code=202)
+    
+    
 @fastapi_app.post("/backtest")
 def backtest(request_json: BacktestRequestJson, authorization: Optional[str] = Header(None)):
     from jesse.services.multiprocessing_module import process_manager
