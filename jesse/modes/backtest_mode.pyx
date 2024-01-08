@@ -715,12 +715,26 @@ def trim_zeros(arr):
     slices = tuple(slice(idx.min(), idx.max() + 1) for idx in np.nonzero(arr))
     return arr[slices]
 
+def process_indicator(indicator, candle_prestorage_shape, consider_timeframes):
+    if indicator is None:
+        return None
+
+    def delete_slice(array):
+        return np.delete(array, slice(0, int(candle_prestorage_shape / consider_timeframes) - 1)).tolist()
+
+    if isinstance(indicator, tuple):
+        return tuple(delete_slice(arr) for arr in indicator)
+
+    elif isinstance(indicator, np.ndarray):
+        return delete_slice(indicator)
+    else:
+        raise TypeError("Indicator is neither a tuple nor a single NumPy array.")
 
 def indicator_precalculation(dict candles,double [:,::1] first_candles_set,strategy, bint skip_1m = False, preload_candles = False, str min_timeframe=None):
     cdef Py_ssize_t  i, consider_timeframes, candle_prestorage_shape, index, offset, length,rows, index2, candle_count
-    cdef np.ndarray empty_ndarray, candle_prestorage, partial_array, partial_date_array, modified_partial_array, \
-    indicator1, indicator2, indicator3, indicator4, indicator5, \
-    indicator6, indicator7, indicator8, indicator9,indicator10 
+    cdef np.ndarray empty_ndarray, candle_prestorage, partial_array, partial_date_array, modified_partial_array #, \
+    # indicator1, indicator2, indicator3, indicator4, indicator5, \
+    # indicator6, indicator7, indicator8, indicator9,indicator10 
     cdef double[::1] gen_candles
     cdef tuple timeframe_tuple = config['app']['considering_timeframes']
     cdef tuple trading_timeframe_tuple = config['app']['trading_timeframes']
@@ -869,7 +883,7 @@ def indicator_precalculation(dict candles,double [:,::1] first_candles_set,strat
                 indicator2_storage = None
             if indicator3 is not None:
                 indicator3 = np.delete(indicator3,slice(0,(candle_prestorage_shape/consider_timeframes)-1))
-                indicator3_storage[key] =  list(indicator3)
+                indicator3_storage[key] = list(indicator3)
             else:
                 indicator3_storage = None
             if indicator4 is not None:
@@ -1511,15 +1525,14 @@ def _simulate_price_change_effect(np.ndarray real_candle, str exchange, str symb
     cdef np.ndarray current_temp_candle = real_candle.copy()
     cdef str key = f'{exchange}-{symbol}'
     cdef list orders = store.orders.storage.get(key,[])
-    cdef Py_ssize_t len_orders = PyList_GET_SIZE(orders)
     executed_order = False
     p = store.positions.storage.get(key, None)
     while True:
-        if len_orders == 0:
+        if len(orders) == 0:
             executed_order = False
         else:
             for index, order in enumerate(orders):
-                if index == len_orders - 1 and not order.status == order_statuses.ACTIVE:
+                if index == len(orders) - 1 and not order.status == order_statuses.ACTIVE:
                     executed_order = False 
                 if not order.status == order_statuses.ACTIVE:
                     continue
@@ -1623,21 +1636,20 @@ cdef _simulate_price_change_effect_skip(double[::1] real_candle, str exchange, s
     cdef double[::1] current_temp_candle = real_candle[:]
     cdef str key = f'{exchange}-{symbol}'
     cdef list orders = store.orders.storage.get(key,[])
-    cdef Py_ssize_t len_orders = PyList_GET_SIZE(orders)
     executed_order = False
     p = store.positions.storage.get(key, None)
     while True:
-        if len_orders == 0:
+        if len(orders) == 0:
             executed_order = False
         else:
             for index, order in enumerate(orders):
-                if index == len_orders - 1 and not order.status == order_statuses.ACTIVE:
+                if index == len(orders) - 1 and not order.status == order_statuses.ACTIVE:
                     executed_order = False 
                 if not order.status == order_statuses.ACTIVE:
                     continue
                 if (order.price >= current_temp_candle[4]) and (order.price <= current_temp_candle[3]): #candle_includes_price(current_temp_candle, order.price):
                     try:
-                        storable_temp_candle, current_temp_candle = split_candle(current_temp_candle, order.price)
+                        storable_temp_candle, current_temp_candle = split_candle((current_temp_candle), order.price)
                     except Exception as e: 
                         print(e)
                         print(f'{current_temp_candle} - {order.price}')
@@ -1656,6 +1668,7 @@ cdef _simulate_price_change_effect_skip(double[::1] real_candle, str exchange, s
                     break
                 else:
                     executed_order = False
+
         if not executed_order:
             # add/update the real_candle to the store so we can move on
             if not precalc_candles:
@@ -1668,7 +1681,6 @@ cdef _simulate_price_change_effect_skip(double[::1] real_candle, str exchange, s
             if p:
                 p.current_price = real_candle[2]
             break
-            
     # p: Position = store.positions.storage.get(key, None)
     if not p:
         return
