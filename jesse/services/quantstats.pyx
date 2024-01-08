@@ -32,19 +32,33 @@ def quantstats_tearsheet(buy_and_hold_returns: pd.Series, study_name: str, optun
         with open("optuna_config.yml", "r") as ymlfile:
             cfg = yaml.load(ymlfile, yaml.SafeLoader)
         path_name = f'{path_name}-{cfg["optimizer"]}-{len(cfg["route"].items())} Pairs'
-        file_path = f"./storage/jesse-optuna/validation_metrics/{path_name}/{study_name} QuantStats Report.html"
+        file_path = f"./storage/optuna/validation/{path_name}/{study_name} QuantStats Report.html"
 
     title = f"{modes[mode][1]} → {arrow.utcnow().strftime('%d %b, %Y %H:%M:%S')} → {study_name}"
-    
+    benchmark_title = extract_benchmark_title(study_name)
+    strategy_title = extract_strategy_title(study_name)
     try:
-        qs.reports.html(returns=returns_time_series, periods_per_year=365, benchmark=buy_and_hold_returns, title=title, output=file_path)
+        qs.reports.html(returns=returns_time_series, periods_per_year=365, benchmark=buy_and_hold_returns, title=title, output=file_path,strategy_title=strategy_title, benchmark_title=benchmark_title)
     except IndexError:
         qs.reports.html(returns=returns_time_series, periods_per_year=365, title=title, output=file_path)
-    except:
+    except Exception as e:
+        print(e)
+        print(f'title : {title}')
         raise
     return file_path
 
-
+def extract_benchmark_title(study_name):
+    parts = study_name.split('-')
+    symbol = '-'.join(parts[2:4]) if len(parts) > 3 else "Unknown"
+    benchmark_title = f"{symbol} Buy & Hold"
+    return benchmark_title
+    
+def extract_strategy_title(study_name):
+    parts = study_name.split('-')
+    strategy_name = parts[0] if len(parts) > 0 else "Unknown"
+    strategy_title = f"{strategy_name} Strategy"
+    return strategy_title
+    
 # from datetime import timedelta
 # import quantstats.plots as _plots
 # import quantstats.stats as _stats

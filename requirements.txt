@@ -12,7 +12,7 @@ psycopg2-binary==2.9.5
 pydash==5.1.1
 pytest==7.2.0
 PyWavelets==1.4.1
-quantstats==0.0.47
+quantstats==0.0.62
 requests==2.28.1
 scipy==1.8.1
 statsmodels==0.13.2
