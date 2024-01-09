@@ -40,40 +40,39 @@ class FuturesExchange(Exchange):
     def available_margin(self) -> float:
         from jesse.store import store 
         # a temp which gets added to per each asset (remember that all future assets use the same currency for settlement)
-        cdef double temp_credits = self.assets[self.settlement_currency]
+        
+        #cdef double temp_credits = self.assets[self.settlement_currency]
+        cdef double margin = self.wallet_balance
         cdef double sum_buy_orders, sum_sell_orders
         cdef int c_leverage = self.futures_leverage
-        # we need to consider buy and sell orders of ALL pairs
-        # also, consider the value of all open positions
+        # Calculate the total spent amount considering leverage
+        # Here we need to calculate the total cost of all open positions and orders, considering leverage
+        cdef float total_spent = 0.0
         for asset in self.assets:
             if asset == self.settlement_currency:
                 continue
                 
             key = f'{self.name}-{f"{asset}-{self.settlement_currency}"}'
             position = store.positions.storage.get(key, None)
-            if position is None:
-                continue
 
-            if position.qty != 0:
+            if position.qty != 0 and position:
+                # Adding the cost of open positions
+                total_spent += position.total_cost
                 # add unrealized PNL
-                temp_credits += position.pnl
+                total_spent -= position.pnl
 
-            # only which of these has actual values, so we can count all of them!
+            # Summing up the cost of open orders (buy and sell), considering leverage
             sum_buy_orders = (self.buy_orders[asset].array[0:self.buy_orders[asset].index+1][:,0] * self.buy_orders[asset].array[0:self.buy_orders[asset].index+1][:,1]).sum()
             sum_sell_orders = (self.sell_orders[asset].array[0:self.sell_orders[asset].index+1][:,0] * self.sell_orders[asset].array[0:self.sell_orders[asset].index+1][:,1]).sum()
 
-            if position.qty != 0:
-                temp_credits -= position.total_cost
-
-            # Subtract the amount we paid for open orders. Notice that this does NOT include
-            # reduce_only orders so either sum_buy_orders or sum_sell_orders is zero. We also
-            # care about the cost we actually paid for it which takes into account the leverage
-            temp_credits -= fmax(
+            total_spent += fmax(
                 abs(sum_buy_orders) / c_leverage, abs(sum_sell_orders) / c_leverage
             )
 
-        # count in the leverage
-        return temp_credits * c_leverage
+        # Subtracting the total spent from the margin
+        margin -= total_spent
+
+        return margin
 
     def charge_fee(self, double amount) -> None:
         cdef double c_fee_rate = self.fee_rate
@@ -93,16 +92,17 @@ class FuturesExchange(Exchange):
 
     def on_order_submission(self, order: Order) -> None:
         base_asset = order.symbol.split('-')[0]
-        cdef double order_size, remaining_margin
+        cdef double order_size, remaining_margin, effective_order_size
         cdef double c_qty = order.qty 
         cdef double c_price = order.price
 
         # make sure we don't spend more than we're allowed considering current allowed leverage
         if not order.reduce_only:
-            order_size = abs(order.qty * order.price)
-            if order_size > self.available_margin:
+            # Calculate the effective order size considering leverage
+            effective_order_size = abs(order.qty * order.price) / self.futures_leverage
+            if effective_order_size > self.available_margin:
                 raise InsufficientMargin(
-                    f'You cannot submit an order for ${round(order_size)} when your margin balance is ${round(self.available_margin)}')
+                    f'You cannot submit an order for ${round(order.qty * order.price)} when your effective margin balance is ${round(self.available_margin)} considering leverage')
 
         self.available_assets[base_asset] += c_qty
 
