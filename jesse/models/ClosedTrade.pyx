@@ -185,7 +185,9 @@ class ClosedTrade():
         return cython_sum((orders[:, 0] * orders[:, 1])) / cython_sum(orders[:, 0])
         # return (orders[:, 0] * orders[:, 1]).sum() / orders[:, 0].sum()
 
-
+    @property
+    def is_open(self) -> bool:
+        return self.opened_at is not None
     
 class DynamicNumpyArray:
     def __init__(self, shape: tuple,int index = -1, attributes: dict = None):
