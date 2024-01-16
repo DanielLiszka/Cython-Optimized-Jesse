@@ -14,7 +14,8 @@ from jesse.services.redis import async_redis, async_publish, sync_publish
 from jesse.services.web import fastapi_app, BacktestRequestJson, ImportCandlesRequestJson, CancelRequestJson, \
     LoginRequestJson, ConfigRequestJson, LoginJesseTradeRequestJson, NewStrategyRequestJson, FeedbackRequestJson, \
     ReportExceptionRequestJson, OptimizationRequestJson, OptunaRequestJson, OptunaSpecialRequestJson, HyperparametersSavingRequestJson, HyperparametersSendingRequestJson, \
-    CodeSendingRequestJson, ParamEvalRequestJson
+    CodeSendingRequestJson, ParamEvalRequestJson, CodeFormattingRequestJson
+    
 import uvicorn
 from asyncio import Queue
 import jesse.helpers as jh
@@ -252,6 +253,28 @@ def import_candles(request_json: ImportCandlesRequestJson, authorization: Option
     )
 
     return JSONResponse({'message': 'Started importing candles...'}, status_code=202)
+
+@fastapi_app.post('/code-formatting')
+def code_formatting(request_json: CodeFormattingRequestJson, authorization: Optional[str] = Header(None)) -> JSONResponse:
+    validate_cwd()
+
+    if not authenticator.is_valid_token(authorization):
+        return authenticator.unauthorized_response()
+
+    from jesse.modes.strategy_editing import format_code_with_autopep8
+    
+    try:
+        data = format_code_with_autopep8(request_json.code)
+    except Exception as e:
+        return JSONResponse({
+            'error': str(e)
+        }, status_code=500)
+
+    return JSONResponse(
+        data,
+        status_code=200
+    )
+    
 
 
 @fastapi_app.delete("/import-candles")

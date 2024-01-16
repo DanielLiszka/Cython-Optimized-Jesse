@@ -120,7 +120,9 @@ class ImportCandlesRequestJson(BaseModel):
     symbol: str
     start_date: str
 
-
+class CodeFormattingRequestJson(BaseModel):
+    code: str
+    
 class CancelRequestJson(BaseModel):
     id: str
 
