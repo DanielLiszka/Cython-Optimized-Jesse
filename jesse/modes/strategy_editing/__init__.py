@@ -86,13 +86,42 @@ def compile_code(code):
     except SyntaxError as e:
         return False, str(e)
 
-def lint_code(code, filename='temp_code.py'):
-    with open(filename, 'w') as file:
-        file.write(code)
-    result = subprocess.run(['flake8', filename], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-    os.remove(filename)
-    return result.stdout.decode('utf-8')
+def convert_hashtag_comments_to_triple_quotes(code):
+    code = re.sub(r'^(\s*)#(.+)$', r'\1"""\2"""', code, flags=re.MULTILINE)
 
+    def replace_inline_comments(match):
+        pre_comment = match.group(1)
+        comment = match.group(2)
+        if '"' not in pre_comment or "'" not in pre_comment:  # rudimentary check for strings
+            return pre_comment + '"""' + comment + '"""'
+        return match.group(0)
+
+    code = re.sub(r'(.+?)\s*#(.+)', replace_inline_comments, code, flags=re.MULTILINE)
+    return code
+   
+
+from pyflakes.api import check
+from pyflakes.reporter import Reporter
+import io
+
+def analyze_pyflakes_output(pyflakes_output):
+    lines = pyflakes_output.splitlines()
+    filtered_errors = []
+    for line in lines:
+        if "imported but unused" in line:
+            continue
+        else:
+            filtered_errors.append(line + '\n')
+
+    return ''.join(filtered_errors)
+    
+def check_code_with_pyflakes(code):
+    stdout_capture = io.StringIO()
+    stderr_capture = io.StringIO()
+    reporter = Reporter(stdout_capture, stderr_capture)
+    check(code, "<string>", reporter)
+    return stdout_capture.getvalue()
+    
 def format_code_with_autopep8(code):
     """Format code using autopep8."""
     return autopep8.fix_code(code, options={'aggressive': 1})
@@ -102,6 +131,12 @@ def code_saving(strategy_name, code):
     is_valid, error = compile_code(code)
     if not is_valid:
         return f"Syntax error: {error}"
+        
+    pyflake_message = check_code_with_pyflakes(code)
+    pyflake_error_messages = analyze_pyflakes_output(pyflake_message)
+    if pyflake_error_messages:
+        return pyflake_error_messages
+        
     formatted_code = format_code_with_autopep8(code)
     try:
         os.makedirs(os.path.dirname(file_path), exist_ok=True)
@@ -139,6 +174,7 @@ def update_hyperparameters_from_json(strategy_name, updated_hyperparameters):
     try:
         with open(file_path, 'r') as file:
             original_content = file.read()
+            
         tree = ast.parse(original_content)
         transformer = HyperparameterTransformer(updated_hyperparameters)
         transformer.visit(tree)
