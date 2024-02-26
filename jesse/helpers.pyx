@@ -184,11 +184,8 @@ def dna_to_hp(strategy_hp, dna: str):
 
     for gene, h in zip(dna, strategy_hp):
         if h['type'] is int:
-            decoded_gene = int(
-                round(
-                    convert_number(119, 40, h['max'], h['min'], ord(gene))
-                )
-            )
+            decoded_number = convert_number(119, 40, h['max'], h['min'], ord(gene))
+            decoded_gene = int(round(decoded_number))
         elif h['type'] is float:
             decoded_gene = convert_number(119, 40, h['max'], h['min'], ord(gene))
         else:
@@ -203,11 +200,8 @@ def hp_to_dna(strategy_hp: list, values: dict) -> str:
 
     for h in strategy_hp:
         if h['type'] is int or h['type'] is float:
-            encoded_gene = chr(
-                round(
-                    convert_number(h['max'], h['min'], 119, 40, values[h['name']])
-                )
-            )
+            encoded_number = convert_number(h['max'], h['min'], 119, 40, values[h['name']])
+            encoded_gene = chr(max(40, min(119, round(encoded_number))))
         else:
             raise TypeError('Only int and float types are implemented')
 
@@ -402,7 +396,7 @@ def is_livetrading() -> bool:
 
 def is_optimizing() -> bool:
     return config['app']['trading_mode'] == 'optimize'
-
+    
 def is_paper_trading() -> bool:
     return False #config['app']['trading_mode'] == 'papertrade'
 
@@ -979,13 +973,23 @@ def str_or_none(item, encoding='utf-8'):
         except TypeError:
             return str(item)
 
-def is_price_near(order_price, price_to_compare, threshold_ratio=0.0001):
-    """Check if the given order price is near the specified price."""
-    percentage_threshold = threshold_ratio * price_to_compare
-    # Enforcing a minimum threshold for smaller numbers
-    fixed_threshold = 0.001
-    threshold = max(percentage_threshold, fixed_threshold)
-    return abs(order_price - price_to_compare) < threshold
+def is_price_near(order_price, price_to_compare):
+    """
+    Check if given order price is near the specified price.
+    This function checks a range of price values and applies the associated threshold.
+    :param order_price: float
+    :param price_to_compare: float
+    :return: bool
+    """
+    # Define the price ranges and associated thresholds
+    conditions = [order_price < 0.01, order_price < 1, order_price < 100, order_price < 10000, order_price >= 10000]
+    threshold_ratios = [0.015, 0.01, 0.005, 0.001, 0.0001]
+
+    # Use np.select to choose the threshold ratio based on the conditions
+    threshold_ratio = np.select(conditions, threshold_ratios)
+
+    threshold = threshold_ratio * order_price
+    return abs(order_price - price_to_compare) <= threshold
 
 def cpu_cores_count():
     from multiprocessing import cpu_count

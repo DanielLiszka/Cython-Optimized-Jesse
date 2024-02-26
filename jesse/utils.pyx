@@ -139,7 +139,8 @@ def qty_to_size(qty: float, price: float) -> float:
     :param price: float
     :return: float
     """
-    if math.isnan(qty) or math.isnan(price):
+    #if math.isnan(qty) or math.isnan(price):\
+    if isnan(qty) or isnan(price):
         raise TypeError()
 
     return qty * price
@@ -213,7 +214,7 @@ def size_to_qty(position_size: float, entry_price: float, precision: int = 3, fe
     return floor((position_size / entry_price) * temp) / temp
 
 
-def subtract_floats(float1: float, float2: float) -> float:
+def subtract_floats(float1:float, float2:float) -> float:
     """
     Subtracts two floats without the rounding issue in Python
 
@@ -222,20 +223,36 @@ def subtract_floats(float1: float, float2: float) -> float:
 
     :return: float
     """
+    
+    # float1_ = 399499.499932522
+    # float2_ = 2882.050400252
+    
+    # try:
+        # assert float(Decimal(str(float1_)) - Decimal(str(float2_))) == (float1_ - float2_)
+    # except Exception as e:
+        # print(f'{float(Decimal(str(float1_)) - Decimal(str(float2_)))} -- {float1_ - float2_}')
+        # pass
+        
     return float(Decimal(str(float1)) - Decimal(str(float2)))
+    # return (float1 - float2)
 
-
-def sum_floats(float1: float, float2: float) -> float:
+def sum_floats(float1:float, float2:float) -> float:
     """
     Sums two floats without the rounding issue in Python
 
     :param float1: float
     :param float2: float
-
+  
     :return: float
     """
-    return float(Decimal(str(float1)) + Decimal(str(float2)))
 
+    # try:
+        # assert float(Decimal(str(float1_)) + Decimal(str(float2_))) == (float1_ + float2_)
+    # except Exception as e:
+        # print(f'{float(Decimal(str(float1_)) + Decimal(str(float2_)))} -- {float1_ + float2_}')
+        # pass
+    return float(Decimal(str(float1)) + Decimal(str(float2)))
+    # return (float1 + float2)
 
 def strictly_increasing(series: np.ndarray, lookback: int) -> bool:
     a = series[-lookback:]
