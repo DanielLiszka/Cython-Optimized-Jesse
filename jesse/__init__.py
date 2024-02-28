@@ -14,7 +14,7 @@ from jesse.services.redis import async_redis, async_publish, sync_publish
 from jesse.services.web import fastapi_app, BacktestRequestJson, ImportCandlesRequestJson, CancelRequestJson, \
     LoginRequestJson, ConfigRequestJson, LoginJesseTradeRequestJson, NewStrategyRequestJson, FeedbackRequestJson, \
     ReportExceptionRequestJson, OptimizationRequestJson, OptunaRequestJson, OptunaSpecialRequestJson, HyperparametersSavingRequestJson, HyperparametersSendingRequestJson, \
-    CodeSendingRequestJson, ParamEvalRequestJson, CodeFormattingRequestJson
+    CodeSendingRequestJson, ParamEvalRequestJson, CodeFormattingRequestJson, InitialChartingRequestJson
     
 import uvicorn
 from asyncio import Queue
@@ -305,6 +305,56 @@ def hyperparameters_sending(request_json: HyperparametersSendingRequestJson, aut
     )
     
     return JSONResponse({'message': 'Retrieved Hyperparameters...'}, status_code=202)
+
+
+@fastapi_app.post("/initial-charting")
+def initial_charting(request_json: InitialChartingRequestJson, authorization: Optional[str] = Header(None)) -> JSONResponse:
+    # from jesse.services.multiprocessing_module import process_manager
+
+    # if not authenticator.is_valid_token(authorization):
+        # return authenticator.unauthorized_response()
+ 
+    # from jesse.modes.charting import charting
+
+    # process_manager.add_task(
+        # charting,
+        # str(request_json.destination[0]) +'-' + str(request_json.destination[1]),
+        # request_json.config, 
+        # request_json.routes,
+        # request_json.start_date,
+        # request_json.finish_date,
+        # request_json.destination,
+        # request_json.indicator_info
+    # )
+    
+    # return JSONResponse({'message': 'Retrieved CandleSticks for Selected Route...'}, status_code=202)
+    import logging
+    logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+    logger = logging.getLogger(__name__)
+    
+    if not authenticator.is_valid_token(authorization):
+        return authenticator.unauthorized_response()
+ 
+    from jesse.modes.charting import charting
+
+    try:
+        data = charting(
+        request_json.config, 
+        request_json.routes,
+        request_json.start_date,
+        request_json.finish_date,
+        request_json.destination,
+        request_json.indicator_info
+        )
+    except Exception as e:
+        logger.exception("An error occurred while processing the request.")
+        return JSONResponse({"detail": str(e)}, status_code=500)
+
+    return JSONResponse(
+        data,
+        status_code=200
+    )
+
 
 @fastapi_app.get("/code-receiving")
 def code_receiving(strategy_name:str, authorization: Optional[str] = Header(None)) -> JSONResponse:

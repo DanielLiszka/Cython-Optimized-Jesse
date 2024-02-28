@@ -44,6 +44,15 @@ class ParamEvalRequestJson(BaseModel):
     finish_date: str
     debug_mode: bool
 
+class InitialChartingRequestJson(BaseModel):
+    id: str
+    config: dict
+    routes: Dict[str, str]
+    start_date: str
+    finish_date: str
+    destination: list
+    indicator_info: dict
+    
 
 class OptimizationRequestJson(BaseModel):
     id: str

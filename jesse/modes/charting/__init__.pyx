@@ -12,6 +12,7 @@ from jesse.services.cache import cache
 import arrow
 from datetime import datetime, timedelta 
 from jesse.enums import timeframes
+from jesse.services.redis import sync_publish
 
 timeframe_to_minutes = {
     timeframes.MINUTE_1: 1,
@@ -34,42 +35,38 @@ timeframe_to_minutes = {
     
 def charting(        
     user_config: dict,
-    routes: List[Dict[str, str]],
+    routes: Dict[str, str],
     start_date: str,
     finish_date: str,
+    destination: list,
     indicator_info: dict = None
     ):
+    
     candles = load_candles(start_date, finish_date, user_config,routes)
-    
-    
-    start_date = datetime.strptime(start_date, "%Y-%m-%d")
-    start_timestamp = int(start_date.timestamp())
+    start_date_formatted = datetime.strptime(start_date, "%Y-%m-%d")
+    start_timestamp = int(start_date_formatted.timestamp())
     filtered_candles = candles[candles[:, 0] >= start_timestamp]
-    charted_candlesticks = list(filtered_candles)
+    charted_candlesticks = filtered_candles.tolist()
     
     # Return CandleSticks for now.
+    print('returning data')
+    #sync_publish('charting_candlesticks', charted_candlesticks, destination[0])
     return charted_candlesticks
+
     
     
-    
-
-
-
-
-
-
 @cython.wraparound(True)
-def load_candles(start_date_str: str, finish_date_str: str, user_config: dict, routes:List[Dict[str, str]]) -> Dict[str, Dict[str, Union[str, np.ndarray]]]:
+def load_candles(start_date_str: str, finish_date_str: str, user_config: dict, routes:Dict[str, str]) -> np.ndarray:
     cdef long start_date, finish_date, 
     cdef double required_candles_count
     cdef bint from_db
     cdef dict candles
     
     date_obj = datetime.strptime(start_date_str, "%Y-%m-%d")
-    timeframe = routes[0]['timeframe']
-    total_minutes = user_config['warmp_up_candles'] * timeframe_to_minutes(timeframe)
+    timeframe = routes['timeframe']
+    total_minutes = user_config['warm_up_candles'] * timeframe_to_minutes[timeframe]
     new_date_obj = date_obj - timedelta(minutes=total_minutes + 1440)
-    start_date_str = new_date_obj.date()
+    start_date_str = new_date_obj.strftime("%Y-%m-%d")
     start_date = jh.date_to_timestamp(start_date_str)
     finish_date = jh.date_to_timestamp(finish_date_str) - 60000
     
@@ -85,8 +82,8 @@ def load_candles(start_date_str: str, finish_date_str: str, user_config: dict, r
 
     # download candles for the duration of the backtest
     candles = {}
-    exchange = routes[0]['exchange']
-    symbol = routes[0]['symbol']
+    exchange = routes['exchange']
+    symbol = routes['symbol']
     from_db = False
     key =  f'{exchange}-{symbol}'
 
@@ -133,10 +130,4 @@ def load_candles(start_date_str: str, finish_date_str: str, user_config: dict, r
     if from_db:
         cache.set_value(cache_key, tuple(candles_tuple), expire_seconds=60 * 60 * 24 * 7)
 
-    candles[key] = {
-        'exchange': exchange,
-        'symbol': symbol,
-        'candles': np.array(candles_tuple)
-    }
-
-    return candles
+    return np.array(candles_tuple)
