@@ -182,3 +182,5 @@ jesse.egg-info/*
 docker_build_helpers/*
 build/*
 jesse/config.py
+jesse/storage/*
+jesse/static-unused/*

@@ -23,11 +23,11 @@ from .cfo import cfo
 from .cg import cg
 from .chaikin_ad import chaikin_ad
 from .chande import chande
-# from .chandelier import chandelier
+from .chandelier import chandelier
 from .chop import chop
 from .cksp import cksp
 from .cmo import cmo
-# from .connors_rsi import connors_rsi
+from .connors_rsi import connors_rsi
 from .correl import correl
 from .correlation_cycle import correlation_cycle
 from .crossany import crossany
@@ -54,12 +54,12 @@ from .epma import epma
 from .er import er
 from .eri import eri
 from .expotential_decay import expotential_decay
-# from .fcb import fcb
+from .fcb import fcb
 from .fisher import fisher
 from .fosc import fosc
 from .frama import frama
 from .fwma import fwma
-# from .gator import gator
+from .gator import gator
 from .gatorosc import gatorosc
 from .gauss import gauss
 from .heikin_ashi_candles import heikin_ashi_candles
@@ -123,9 +123,9 @@ from .pattern_recognition import pattern_recognition
 from .pfe import pfe
 from .pivot import pivot
 from .pma import pma
-# from .pmo import pmo
+from .pmo import pmo
 from .ppo import ppo
-# from .prs import prs 
+from .prs import prs 
 from .pvi import pvi
 from .pwma import pwma
 from .qstick import qstick
@@ -146,12 +146,12 @@ from .sarext import sarext
 from .sinwma import sinwma
 from .skew import skew
 from .sma import sma
-# from .smi import smi
+from .smi import smi
 from .smma import smma
 from .sqwma import sqwma
 from .srsi import srsi
 from .srwma import srwma
-# from .starc_bands import starc_bands
+from .starc_bands import starc_bands
 from .stc import stc
 from .stddev import stddev
 from .stochastic import stoch
@@ -177,7 +177,7 @@ from .vhf import vhf
 from .vi import vi
 from .vidya import vidya
 from .vlma import vlma
-# from .volatility_stop import volatility_stop
+from .volatility_stop import volatility_stop
 from .vosc import vosc
 from .voss import voss
 from .vpci import vpci
