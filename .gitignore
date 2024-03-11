@@ -175,12 +175,16 @@ Dockerfile
 dashboard_cythonize.py
 cythonize.py
 cyt_x11.pyx
+cy_uuid4.pyx
 *.yml
 temp_cache/*
 storage/*
 jesse.egg-info/*
 docker_build_helpers/*
 build/*
-jesse/config.py
 jesse/storage/*
 jesse/static-unused/*
+!backtesting_chart_example.html
+!jesse/static/index.html
+jesse/scripts/*
+docker_build_helpers/*
