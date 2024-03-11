@@ -450,7 +450,8 @@ def test_round_qty_for_live_mode():
         jh.round_qty_for_live_mode(np.array([0]), 3),
         np.array([0.001])
     )
-
+    with pytest.raises(ValueError):
+        jh.round_qty_for_live_mode(np.array([9]), -1)
     # round one number only
     to_round = 10.123456789
     expected_result = 10.1234
@@ -461,7 +462,9 @@ def test_round_qty_for_live_mode():
 
 def test_round_decimals_down():
     assert jh.round_decimals_down(100.329, 2) == 100.32
-
+    assert jh.round_decimals_down(115.329, -1) == 110
+    assert jh.round_decimals_down(115.329, -2) == 100
+    assert jh.round_decimals_down(115.329, 0) == 115
 
 def test_secure_hash():
     assert jh.secure_hash('test') == "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08"
@@ -596,6 +599,10 @@ def test_str_or_none():
     assert jh.str_or_none('') is ''
     assert jh.str_or_none(3009004354) == '3009004354'
     assert jh.str_or_none(b'3009004354') == '3009004354'
+    assert jh.str_or_none(1239.5) == '1239.5'
+    a = np.array([1239.5])
+    assert jh.str_or_none(a[0]) == '1239.5'
+
 
 
 def test_float_or_none():
@@ -621,3 +628,24 @@ def test_round_or_none():
     assert jh.round_or_none(1.23) == 1
     assert jh.round_or_none(1.23456789, 2) == 1.23
     assert jh.round_or_none(None) is None
+
+def test_timestamp_to_iso8601():
+    assert jh.timestamp_to_iso8601(1609804800000) == '2021-01-05T00:00:00+00:00'
+
+
+def test_iso8601_to_timestamp():
+    assert jh.iso8601_to_timestamp('2021-01-05T00:00:00.000Z') == 1609804800000
+    
+def test_is_price_near():
+    assert jh.is_price_near(0.007386, 0.007385) == True
+    assert jh.is_price_near(0.007386, 0.007396) == True
+    assert jh.is_price_near(60000, 60000) == True
+    assert jh.is_price_near(60000, 60000.1) == True
+    assert jh.is_price_near(60000, 60100) == False
+    assert jh.is_price_near(30000, 30005) == False
+    assert jh.is_price_near(30000, 30002) == True
+    assert jh.is_price_near(30000, 29800) == False
+    assert jh.is_price_near(200, 200.01) == True
+    assert jh.is_price_near(20, 20.001) == True
+    assert jh.is_price_near(0.0014458, 0.0014458*1.05) == False
+    assert jh.is_price_near(0.0014458, 0.0014458*1.10) == False

@@ -40,7 +40,6 @@ def maaq(candles: np.ndarray, period: int = 11, fast_period: int = 2, slow_perio
     # Safely divide signal by noise
     ratio = np.divide(signal, noise, out=np.zeros_like(signal), where=(noise != 0))
 
-
     fastSc = 2 / (fast_period + 1)
     slowSc = 2 / (slow_period + 1)
     temp = np.power((ratio * fastSc) + slowSc, 2)

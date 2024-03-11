@@ -102,7 +102,7 @@ class ClosedTrade():
 
     @property
     def fee(self) -> float:
-        trading_fee = config['env']['exchanges'][self.exchange]['fee']
+        cdef float trading_fee = config['env']['exchanges'][self.exchange]['fee']
         return trading_fee * self.qty * (self.entry_price + self.exit_price)
 
     @property
@@ -184,6 +184,7 @@ class ClosedTrade():
 
         return cython_sum((orders[:, 0] * orders[:, 1])) / cython_sum(orders[:, 0])
         # return (orders[:, 0] * orders[:, 1]).sum() / orders[:, 0].sum()
+
 
     @property
     def is_open(self) -> bool:

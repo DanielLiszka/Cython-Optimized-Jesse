@@ -26,7 +26,7 @@ class TestMetrics1(Strategy):
         assert self.metrics['starting_balance'] == 10000
         assert self.metrics['finishing_balance'] == 10050
         assert self.metrics['win_rate'] == 1
-        assert self.metrics['ratio_avg_win_loss'] is np.nan
+        assert self.metrics['ratio_avg_win_loss'] != self.metrics['ratio_avg_win_loss'] #is np.nan
         assert self.metrics['longs_count'] == 1
         assert self.metrics['shorts_count'] == 0
         assert self.metrics['longs_percentage'] == 100
@@ -35,12 +35,12 @@ class TestMetrics1(Strategy):
         assert self.metrics['net_profit'] == 50
         assert self.metrics['net_profit_percentage'] == 0.5
         assert self.metrics['average_win'] == 50
-        assert self.metrics['average_loss'] is np.nan
+        assert self.metrics['average_loss'] != self.metrics['average_loss'] #is np.nan
         assert self.metrics['expectancy'] == 50
         assert self.metrics['expectancy_percentage'] == 0.5
         assert self.metrics['expected_net_profit_every_100_trades'] == 50
         assert self.metrics['average_holding_period'] == 300
-        assert self.metrics['average_losing_holding_period'] is np.nan
+        assert self.metrics['average_losing_holding_period'] != self.metrics['average_losing_holding_period'] #is np.nan
         assert self.metrics['average_winning_holding_period'] == 300
         assert self.metrics['gross_loss'] == 0
         assert self.metrics['gross_profit'] == 50

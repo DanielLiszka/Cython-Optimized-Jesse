@@ -48,6 +48,7 @@ def get_fitness(
         log_text = e
         log_text = f"Exception in strategy execution:\n {log_text}"
         logger.log_optimize_mode(log_text)
+        print(e)
         raise e
 
     training_log = {'win-rate': None, 'total': None, 'PNL': None}

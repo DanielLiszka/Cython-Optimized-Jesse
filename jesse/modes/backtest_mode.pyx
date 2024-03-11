@@ -732,9 +732,9 @@ def process_indicator(indicator, candle_prestorage_shape, consider_timeframes):
 
 def indicator_precalculation(dict candles,double [:,::1] first_candles_set,strategy, bint skip_1m = False, preload_candles = False, str min_timeframe=None):
     cdef Py_ssize_t  i, consider_timeframes, candle_prestorage_shape, index, offset, length,rows, index2, candle_count
-    cdef np.ndarray empty_ndarray, candle_prestorage, partial_array, partial_date_array, modified_partial_array #, \
-    # indicator1, indicator2, indicator3, indicator4, indicator5, \
-    # indicator6, indicator7, indicator8, indicator9,indicator10 
+    cdef np.ndarray empty_ndarray, candle_prestorage, partial_array, partial_date_array, modified_partial_array , \
+    indicator1, indicator2, indicator3, indicator4, indicator5, \
+    indicator6, indicator7, indicator8, indicator9,indicator10 
     cdef double[::1] gen_candles
     cdef tuple timeframe_tuple = config['app']['considering_timeframes']
     cdef tuple trading_timeframe_tuple = config['app']['trading_timeframes']
@@ -831,7 +831,8 @@ def indicator_precalculation(dict candles,double [:,::1] first_candles_set,strat
 
             # pd.DataFrame(partial_array).to_csv('stocks_partial_array.csv')
             # print(date_index)
-            
+            # df = pd.DataFrame(partial_array)
+            # df.to_csv('partial_array.csv', index=False)
             #To Do: add sequential parameter here:
             indicator1 = strategy._indicator1(precalc_candles = partial_array,sequential=True)
             indicator2 = strategy._indicator2(precalc_candles = partial_array,sequential=True)
@@ -2186,3 +2187,7 @@ setup(
     new_dict = optimized_function(params_length, memview_fed_candles, full_candle_storage, candle_prestorage_shape, consider_timeframes, strategy, param_grid)
 
     return new_dict
+
+
+
+

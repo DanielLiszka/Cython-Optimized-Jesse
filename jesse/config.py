@@ -16,8 +16,8 @@ config = {
         'simulation': {
             'Montecarlo': False, 
             'skip': True,
-            'precalculation':False,
-            'preload_candles':False,
+            'precalculation':True,
+            'preload_candles':True,
             'precalc_test': False,
             'previous_precalc_values': 1,
             'analyze':False,
@@ -30,7 +30,7 @@ config = {
             'position_increased': True,
             'position_reduced': True,
             'position_closed': True,
-            'shorter_period_candles': False,
+            'shorter_period_candles': False,   
             'trading_candles': True,
             'balance_update': True,
         },
@@ -48,7 +48,7 @@ config = {
         },
         'API_Keys' : {
             'Polygon': {
-                'api_key': 'None',
+                'api_key': '_ivaT5WLTLgpsNksJFCM2g5JLTcJiebV',
             },
             'Alpaca': {
                 'api_key': 'None',
@@ -104,7 +104,12 @@ config = {
 
         # Accepted values are: 'backtest', 'livetrade', 'fitness'.
         'trading_mode': '',
-
+        
+        # Used for optuna optimizing
+        'optimizing_mode': '',
+        
+        'optuna_mode': '',
+        
         # this would enable many console.log()s in the code, which are helpful for debugging.
         'debug_mode': False,
 
@@ -169,6 +174,5 @@ def set_config(conf: dict) -> None:
 def reset_config() -> None:
     global config
     config = backup_config.copy()
-
 
 backup_config = config.copy()

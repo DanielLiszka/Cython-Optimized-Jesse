@@ -307,31 +307,23 @@ def hyperparameters_sending(request_json: HyperparametersSendingRequestJson, aut
     return JSONResponse({'message': 'Retrieved Hyperparameters...'}, status_code=202)
 
 
-@fastapi_app.post("/initial-charting")
-def initial_charting(request_json: InitialChartingRequestJson, authorization: Optional[str] = Header(None)) -> JSONResponse:
-    # from jesse.services.multiprocessing_module import process_manager
+import orjson
 
-    # if not authenticator.is_valid_token(authorization):
-        # return authenticator.unauthorized_response()
- 
-    # from jesse.modes.charting import charting
+class ORJSONResponseArray(JSONResponse):
+    def render(self, content: any):
+        return orjson.dumps(content, option=orjson.OPT_SERIALIZE_NUMPY)
 
-    # process_manager.add_task(
-        # charting,
-        # str(request_json.destination[0]) +'-' + str(request_json.destination[1]),
-        # request_json.config, 
-        # request_json.routes,
-        # request_json.start_date,
-        # request_json.finish_date,
-        # request_json.destination,
-        # request_json.indicator_info
-    # )
-    
-    # return JSONResponse({'message': 'Retrieved CandleSticks for Selected Route...'}, status_code=202)
+class ORJSONResponse(JSONResponse):
+    def render(self, content: any):
+        return orjson.dumps(content)
+        
+@fastapi_app.post("/initial-charting", response_class=ORJSONResponse)
+def initial_charting(request_json: InitialChartingRequestJson, authorization: Optional[str] = Header(None)) -> ORJSONResponse:
     import logging
+    import time
     logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
     logger = logging.getLogger(__name__)
-    
+    #start_time = time.perf_counter()
     if not authenticator.is_valid_token(authorization):
         return authenticator.unauthorized_response()
  
@@ -348,9 +340,9 @@ def initial_charting(request_json: InitialChartingRequestJson, authorization: Op
         )
     except Exception as e:
         logger.exception("An error occurred while processing the request.")
-        return JSONResponse({"detail": str(e)}, status_code=500)
-
-    return JSONResponse(
+        return ORJSONResponse({"detail": str(e)}, status_code=500)
+    #print('Time Duration: ' + str(time.perf_counter() - start_time))
+    return ORJSONResponseArray(
         data,
         status_code=200
     )

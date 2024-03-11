@@ -107,7 +107,7 @@ def candle_includes_price( candle: np.ndarray, float price) -> bool:
     return (price >= candle[4]) and (price <= candle[3])
 
 
-def split_candle(candle: np.ndarray, price:float) -> tuple:
+def split_candle(candle, price:float) -> tuple: 
     """
     splits a single candle into two candles: earlier + later
 

@@ -1,5 +1,5 @@
 class Route:
-    def __init__(self, exchange: str, symbol: str, timeframe: str = None, strategy_name: str = None,
+    def __init__(self, exchange: str, symbol: str, timeframe: str = None, strategy_name = None,
                  dna: str = None) -> None:
         # replace PERP with USD in FTX routes
         if exchange.startswith('FTX') and symbol.upper().endswith('PERP'):

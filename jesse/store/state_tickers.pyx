@@ -43,7 +43,7 @@ class TickersState:
                 # store_ticker_into_db(exchange, symbol, ticker)
                 # return
 
-    def get_tickers(self, exchange: str, symbol: str) -> List[Ticker]:
+    def get_tickers(self, exchange: str, symbol: str) -> np.ndarray[Ticker]:
         key = f'{exchange}-{symbol}'
         return self.storage[key].array[0:self.storage[key].index+1]
 

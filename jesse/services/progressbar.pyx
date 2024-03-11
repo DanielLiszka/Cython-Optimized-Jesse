@@ -10,17 +10,17 @@ DTYPE = np.float32
    
 class Progressbar:
     def __init__(self,int length, int index = 0, int step=1):
-        self.length = length
-        self.index = index
+        self.length:int = length
+        self.index:int = index
         
         # validation
         if self.length <= self.index:
             raise ValueError('length must be greater than 0')
 
         self._time = time()
-        self._execution_times = DynamicNumpyArray((3, 1), drop_at=3)
-        self.step = step
-        self.is_finished = False
+        self._execution_times = DynamicNumpyArray((30000, 1), drop_at=30000)
+        self.step: int = step
+        self.is_finished:bool = False
 
     def update(self):
         if not self.is_finished:

@@ -1,11 +1,17 @@
 from typing import List, Dict
 from jesse.services import charts 
 import copy
+
+import jesse.helpers as jh
+from jesse.services import required_candles
+from jesse.config import config as jesse_config, reset_config
+
 from jesse.models import Candle
 from jesse.modes.utils import save_daily_portfolio_balance
 from jesse.routes import router
 from jesse.services import quantstats
 from jesse.services import report
+# from guppy import hpy
 import pandas as pd 
 import numpy as np 
 from jesse.services.file import store_logs
@@ -55,7 +61,7 @@ def backtest(
     Example `extra_route`:
     [{'exchange': 'Bybit Perpetual', 'symbol': 'BTC-USDT', 'timeframe': '3m'}]
 
-    Example `candles`:
+    Example `candles`:`
     {
         'Binance-BTC-USDT': {
             'exchange': 'Binance',
@@ -65,7 +71,7 @@ def backtest(
     }
     """
     from jesse.services.validators import validate_routes
-    from jesse.modes.backtest_mode import simulator #iterative_simulator as simulator 
+    from jesse.modes.backtest_mode import simulator 
     from jesse.config import config as jesse_config, reset_config
     from jesse.routes import router
     from jesse.store import store
@@ -73,9 +79,11 @@ def backtest(
     from jesse.config import set_config
     from jesse.services import required_candles
     import jesse.helpers as jh
+   
+    # h=hpy()
     
     jesse_config['app']['trading_mode'] = 'backtest'
-
+    
     # inject (formatted) configuration values
     set_config(_format_config(config))
 
@@ -210,6 +218,8 @@ def backtest(
     # profiler.disable()
     # pr_stats = pstats.Stats(profiler).sort_stats('tottime')
     # pr_stats.print_stats(50)
+
+    # print(h.heap())
     if optimizing:
         return result['metrics']
     else:
@@ -251,3 +261,37 @@ def _format_config(config):
         },
         'warm_up_candles': config['warm_up_candles']
     }
+
+def _assert_candles(candles):
+    for key, value in candles.items():
+        candle_set = value['candles']
+        if candle_set[1][0] - candle_set[0][0] != 60_000:
+            raise ValueError(
+                f'Candles passed to the research.backtest() must be 1m candles. '
+                f'\nIf you wish to trade other timeframes, notice that you need to pass it through '
+                f'the timeframe option in your routes. '
+                f'\nThe difference between your candles are {candle_set[1][0] - candle_set[0][0]} milliseconds which more than '
+                f'the accepted 60000 milliseconds.'
+            )
+
+
+def inject_warmup_and_extract_training_candles(config, candles, considering_timeframes):
+    max_timeframe = jh.max_timeframe(considering_timeframes)
+    warm_up_num = config['warm_up_candles'] * jh.timeframe_to_one_minutes(max_timeframe)
+    trading_candles = copy.deepcopy(candles)
+
+    if warm_up_num != 0:
+        for c in jesse_config['app']['considering_candles']:
+            key = jh.key(c[0], c[1])
+            # update trading_candles
+            trading_candles[key]['candles'] = candles[key]['candles'][warm_up_num:]
+            # inject warm-up candles
+            required_candles.inject_required_candles_to_store(
+                candles[key]['candles'][:warm_up_num],
+                c[0],
+                c[1]
+            )
+            # update trading_candles
+            trading_candles[key]['candles'] = candles[key]['candles'][warm_up_num:]
+
+    return trading_candles

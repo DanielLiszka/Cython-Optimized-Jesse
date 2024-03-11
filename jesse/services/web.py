@@ -44,7 +44,13 @@ class ParamEvalRequestJson(BaseModel):
     finish_date: str
     debug_mode: bool
 
-class InitialChartingRequestJson(BaseModel):
+import orjson
+class ORJSONBaseModel(BaseModel):
+    class Config:
+        json_loads = orjson.loads
+        json_dumps = orjson.dumps
+
+class InitialChartingRequestJson(ORJSONBaseModel):
     id: str
     config: dict
     routes: Dict[str, str]

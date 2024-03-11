@@ -26,6 +26,7 @@ if 'strategies' in ls and 'storage' in ls:
         ENV_VALUES['REDIS_PORT'] = '6379'
         ENV_VALUES['REDIS_DB'] = 0
         ENV_VALUES['REDIS_PASSWORD'] = ''
+        ENV_VALUES['APP_PORT'] = '9000'
 
     # validation for existence of .env file
     if len(list(ENV_VALUES.keys())) == 0:

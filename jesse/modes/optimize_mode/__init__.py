@@ -1,5 +1,5 @@
 import os
-from multiprocess import cpu_count
+from multiprocessing import cpu_count
 from typing import Dict, List
 import arrow
 import click
@@ -70,6 +70,7 @@ def run(
 def _get_training_and_testing_candles(start_date_str: str, finish_date_str: str) -> tuple:
     start_date = jh.arrow_to_timestamp(arrow.get(start_date_str, 'YYYY-MM-DD'))
     finish_date = jh.arrow_to_timestamp(arrow.get(finish_date_str, 'YYYY-MM-DD')) - 60000
+
     # Load candles (first try cache, then database)
     candles = load_candles(start_date_str, finish_date_str)
 

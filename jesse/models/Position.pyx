@@ -124,7 +124,7 @@ class Position:
         return base_cost
 
     @property
-    def leverage(self) -> double:
+    def leverage(self):
         if self.exchange_type == 'spot':
             return 1
 

@@ -71,7 +71,7 @@ class TradesState:
             self.temp_storage[key].flush()
         self.temp_storage[key].append(trade)
 
-    def get_trades(self, exchange: str, symbol: str) -> List[Trade]:
+    def get_trades(self, exchange: str, symbol: str) -> np.array[Trade]:
         key = f'{exchange}-{symbol}'
         return self.storage[key].array[0:self.storage[key].index+1]
 

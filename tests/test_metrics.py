@@ -23,7 +23,8 @@ def test_metrics_for_trades_without_fee():
     assert stats['starting_balance'] == 10000
     assert stats['finishing_balance'] == 10050
     assert stats['win_rate'] == 1
-    assert stats['ratio_avg_win_loss'] is np.nan
+    # assert stats['ratio_avg_win_loss'] is np.nan
+    assert stats['ratio_avg_win_loss'] !=  stats['ratio_avg_win_loss']
     assert stats['longs_count'] == 1
     assert stats['shorts_count'] == 0
     assert stats['longs_percentage'] == 100
@@ -32,12 +33,14 @@ def test_metrics_for_trades_without_fee():
     assert stats['net_profit'] == 50
     assert stats['net_profit_percentage'] == 0.5
     assert stats['average_win'] == 50
-    assert stats['average_loss'] is np.nan
+    # assert stats['average_loss'] is np.nan
+    assert stats['average_loss'] != stats['average_loss'] 
     assert stats['expectancy'] == 50
     assert stats['expectancy_percentage'] == 0.5
     assert stats['expected_net_profit_every_100_trades'] == 50
     assert stats['average_holding_period'] == 300
-    assert stats['average_losing_holding_period'] is np.nan
+    # assert stats['average_losing_holding_period'] is np.nan
+    assert stats['average_losing_holding_period'] !=  stats['average_losing_holding_period']
     assert stats['average_winning_holding_period'] == 300
     assert stats['gross_loss'] == 0
     assert stats['gross_profit'] == 50

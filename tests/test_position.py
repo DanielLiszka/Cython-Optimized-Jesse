@@ -2,7 +2,6 @@ from jesse.enums import exchanges
 from jesse.models import Position
 from jesse.testing_utils import set_up, single_route_backtest
 
-
 def test_increase_a_long_position():
     set_up()
 

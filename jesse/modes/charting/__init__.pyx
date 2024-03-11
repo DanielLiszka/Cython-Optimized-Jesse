@@ -10,6 +10,7 @@ from jesse.models import Candle
 from jesse.services.numba_functions import stock_candles_func
 from jesse.services.cache import cache 
 import arrow
+import orjson
 from datetime import datetime, timedelta 
 from jesse.enums import timeframes
 from jesse.services.redis import sync_publish
@@ -46,12 +47,14 @@ def charting(
     start_date_formatted = datetime.strptime(start_date, "%Y-%m-%d")
     start_timestamp = int(start_date_formatted.timestamp())
     filtered_candles = candles[candles[:, 0] >= start_timestamp]
-    charted_candlesticks = filtered_candles.tolist()
-    
-    # Return CandleSticks for now.
-    print('returning data')
+    filtered_candles[:,0] = filtered_candles[:,0] / 1000
+    # charted_candlesticks2 = charted_candlesticks[0]
+    # for row in charted_candlesticks2:
+        # print(type(row))
+        
     #sync_publish('charting_candlesticks', charted_candlesticks, destination[0])
-    return charted_candlesticks
+    # print(filtered_candles[0])
+    return filtered_candles
 
     
     
@@ -91,7 +94,6 @@ def load_candles(start_date_str: str, finish_date_str: str, user_config: dict, r
     if jh.get_config('env.caching.recycle'):
         print('Recycling enabled!')
         cached_value = np.array(cache.slice_pickles(cache_key, start_date_str, finish_date_str, key))
-        
     else:
         cached_value = np.array(cache.get_value(cache_key))
         print('Recycling disabled, falling back to vanilla driver!')

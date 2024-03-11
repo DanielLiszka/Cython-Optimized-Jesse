@@ -79,7 +79,7 @@ exchange_info = {
         'name': exchanges_enums.BITFINEX_SPOT,
         'url': 'https://bitfinex.com',
         'fee': 0.002,
-        'type': 'spot',
+        'type': 'futures',
         'supported_leverage_modes': ['cross'],
         'supported_timeframes': BITFINEX_TIMEFRAMES,
         'modes': {

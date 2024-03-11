@@ -12,7 +12,7 @@ class BitfinexSpot(CandleExchange):
         super().__init__(
             name=exchanges.BITFINEX_SPOT,
             count=1440,
-            rate_limit_per_second=1,
+            rate_limit_per_second=0.5,
             backup_exchange_class=None
         )
 

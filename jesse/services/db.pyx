@@ -2,7 +2,6 @@ from playhouse.postgres_ext import PostgresqlExtDatabase
 import jesse.helpers as jh
 from jesse.services.env import ENV_VALUES
 
-# refactor above code into a class
 class Database:
     def __init__(self):
         self.db: PostgresqlExtDatabase = None

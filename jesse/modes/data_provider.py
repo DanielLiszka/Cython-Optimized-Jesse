@@ -167,6 +167,9 @@ def download_file(mode: str, file_type: str, session_id: str = None):
     elif mode == 'backtest' and file_type == 'backtesting-chart':
         path = f'storage/TradingViewLightReport/{session_id}.html'
         filename = f'backtest-{session_id}.html'
+    elif mode == 'backtest' and file_type == 'correlation-table':
+        path = f'storage/correlations/{session_id}.html'
+        filename = f'backtest-{session_id}.html'
     else:
         raise Exception(f'Unknown file type: {file_type} or mode: {mode}')
 

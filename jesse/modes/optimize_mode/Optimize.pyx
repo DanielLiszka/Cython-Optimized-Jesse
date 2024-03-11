@@ -286,6 +286,7 @@ class Optimizer(ABC):
                         'testing_win_rate': self.population[j]['testing_log']['win-rate'],
                         'testing_total_trades': self.population[j]['testing_log']['total'],
                         'testing_pnl': self.population[j]['testing_log']['PNL'],
+                        'hyperparameters': jh.dna_to_hp(self.options['strategy_hp'],self.population[j]['dna'])
                     } for j in range(number_of_ind_to_show)]
                 sync_publish('best_candidates', best_candidates)
 

@@ -96,6 +96,7 @@ class Strategy(ABC):
         self.increased_count: int = 0
         self.reduced_count: int = 0
         self.counter: int = 0 
+        self.indicator_dict: dict = {}
         
         self.buy = None
         self._buy = None
@@ -108,38 +109,39 @@ class Strategy(ABC):
 
         self._executed_open_orders:list = []
         self._executed_close_orders:list = []
+        self._hp_values = []
         
-        self._current_candle:np.ndarray = None
-        self._indicator1_value_tf = None
-        self._indicator2_value_tf = None
-        self._indicator3_value_tf = None
-        self._indicator4_value_tf = None
-        self._indicator5_value_tf = None
-        self._indicator6_value_tf = None
-        self._indicator7_value_tf = None
-        self._indicator8_value_tf = None
-        self._indicator9_value_tf = None
-        self._indicator10_value_tf = None
+        self._current_candle: np.ndarray = None
+        self._indicator1_value_tf:list = None
+        self._indicator2_value_tf:list = None
+        self._indicator3_value_tf:list = None
+        self._indicator4_value_tf:list = None
+        self._indicator5_value_tf:list = None
+        self._indicator6_value_tf:list = None
+        self._indicator7_value_tf:list = None
+        self._indicator8_value_tf:list = None
+        self._indicator9_value_tf:list = None
+        self._indicator10_value_tf:list = None
         self.other_tf: str = None
        
-        self._indicator1_value = None
-        self._indicator2_value = None 
-        self._indicator3_value = None
-        self._indicator4_value = None
-        self._indicator5_value = None
-        self._indicator6_value = None
-        self._indicator7_value = None
-        self._indicator8_value = None
-        self._indicator9_value = None
-        self._indicator10_value = None 
+        self._indicator1_value:list = None
+        self._indicator2_value:list = None 
+        self._indicator3_value:list = None
+        self._indicator4_value:list = None
+        self._indicator5_value:list = None
+        self._indicator6_value:list = None
+        self._indicator7_value:list = None
+        self._indicator8_value:list = None
+        self._indicator9_value:list = None
+        self._indicator10_value:list = None
         
         
         self.trade: ClosedTrade = None
         self.trades_count: int = 0
-
-        self._is_executing = False
-        self._is_initiated = False
-        self._is_handling_updated_order = False
+        self.grid_opt: bool = False
+        self._is_executing:bool = False
+        self._is_initiated:bool = False
+        self._is_handling_updated_order:bool = False
 
         self.position: Position = None
         self.broker = None
@@ -151,6 +153,10 @@ class Strategy(ABC):
     def update_new_candle(self, candle, exchange, symbol, timeframe):
         pass
         
+    def _hp(self):
+        if self._hp_values != []:
+            self.hp = self._hp_values
+            
     def _init_objects(self) -> None:
         """
         This method gets called after right creating the Strategy object. It
@@ -900,8 +906,9 @@ class Strategy(ABC):
         Handles the execution permission for the strategy.
         """
         cdef float sm_qty
+        cdef bint should_long, should_short
         # make sure we don't execute this strategy more than once at the same time.
-        if self._is_executing is True:
+        if self._is_executing:
             return
                  
         self._is_executing = True
@@ -911,7 +918,7 @@ class Strategy(ABC):
         # self._check()
         
         """
-        Based on the newly updated info, check if we should take action or not
+        Check: Based on the newly updated info, check if we should take action or not
         """
         if not self._is_initiated:
             self._is_initiated = True
@@ -930,6 +937,7 @@ class Strategy(ABC):
             """ Detect and handle entry and exit modifications """
             sm_qty = self.position.qty 
             if sm_qty == 0:
+                print('EARLY RETURN')
                 return
             try:
                 if sm_qty > 0 and self.buy is not None:
@@ -966,7 +974,6 @@ class Strategy(ABC):
                 if sm_qty != 0 and self.take_profit is not None:
                     self._validate_take_profit()
                     self._prepare_take_profit(False)
-
                     # if _take_profit has been modified
                     if not arr_equal(self.take_profit, self._take_profit): #np.array_equal(self.take_profit, self._take_profit):
                         self._take_profit = self.take_profit.copy()
@@ -1035,7 +1042,7 @@ class Strategy(ABC):
             except:
                 raise
 
-            # validations: stop-loss and take-profit should not be the same
+            #validations: stop-loss and take-profit should not be the same
             if (
                     sm_qty != 0
                     and (self.stop_loss is not None and self.take_profit is not None)
@@ -1234,7 +1241,7 @@ class Strategy(ABC):
         return self._cached_metrics[self.trades_count]
 
     @property
-    def time(self) -> int:
+    def time(self):
         """returns the current time"""
         return store.app.time
 
@@ -1254,9 +1261,13 @@ class Strategy(ABC):
         return self.position.exchange.available_margin
 
     @property
+    def leveraged_available_margin(self) -> float:
+        """Current available margin considering leverage"""
+        return self.leverage * self.available_margin
+        
+    @property
     def fee_rate(self) -> float:
         return store.exchanges.storage.get(self.exchange, None).fee_rate  #selectors.get_exchange(self.exchange).fee_rate
-
 
     @property
     def is_long(self) -> bool:
@@ -1376,6 +1387,8 @@ class Strategy(ABC):
         """
         closes open position with a MARKET order
         """
+        if self.grid_opt:
+            return 
         if self.position.qty == 0 :
             return
 
@@ -1537,6 +1550,13 @@ class Strategy(ABC):
     def daily_balances(self):
         return store.app.daily_balance
      
+    @property
+    def min_qty(self) -> float:
+        if not jh.is_live():
+            raise ValueError('self.min_qty is only available in live modes')
+
+        return selectors.get_exchange(self.exchange).vars['precisions'][self.symbol]['min_qty']
+        
     @cython.wraparound(True)
     def check_precalculated_indicator_accuracy(self):
         round_num = 7
