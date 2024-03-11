@@ -188,3 +188,6 @@ jesse/static-unused/*
 !jesse/static/index.html
 jesse/scripts/*
 docker_build_helpers/*
+temp.txt
+.github/ISSUE_TEMPLATE/*
+/jesse/research/jesse_gym_env.py
